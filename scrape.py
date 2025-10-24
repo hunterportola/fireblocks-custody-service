@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 # The starting point for the crawl
-START_URL = "https://developers.fireblocks.com/docs/introduction"
+START_URL = "https://developers.fireblocks.com/reference"
 # The base domain, to ensure we don't leave the docs site
 BASE_URL = "https://developers.fireblocks.com"
 

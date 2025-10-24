@@ -1,0 +1,178 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Originator Configuration",
+  "description": "Configuration schema for Fireblocks Custody Service loan originators",
+  "type": "object",
+  "required": ["workspace", "lendingPartners", "vaultStructure", "approvalStructure", "transactionLimits", "apiSettings"],
+  "properties": {
+    "workspace": {
+      "type": "object",
+      "required": ["name", "environment"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Company or originator name"
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["sandbox", "testnet", "mainnet"],
+          "description": "Fireblocks environment"
+        }
+      }
+    },
+    "lendingPartners": {
+      "type": "object",
+      "required": ["partners"],
+      "properties": {
+        "partners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "enabled"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "description": "Unique partner identifier"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Partner display name"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Active/inactive status"
+              }
+            }
+          }
+        }
+      }
+    },
+    "vaultStructure": {
+      "type": "object",
+      "required": ["namingConvention", "defaultAsset"],
+      "properties": {
+        "namingConvention": {
+          "type": "object",
+          "required": ["prefix", "distributionSuffix", "collectionSuffix"],
+          "properties": {
+            "prefix": {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]+$",
+              "description": "Company prefix (uppercase letters, numbers, underscores)"
+            },
+            "distributionSuffix": {
+              "type": "string",
+              "description": "Suffix for distribution vaults"
+            },
+            "collectionSuffix": {
+              "type": "string",
+              "description": "Suffix for collection vaults"
+            }
+          }
+        },
+        "defaultAsset": {
+          "type": "string",
+          "description": "Fireblocks asset ID (e.g., USDC_ETH, USDC_POLYGON)"
+        }
+      }
+    },
+    "approvalStructure": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["none", "single", "multi", "threshold"],
+          "description": "Approval workflow mode"
+        },
+        "requirements": {
+          "type": "object",
+          "properties": {
+            "numberOfApprovers": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of approvers required (0 = fully automated)"
+            },
+            "approverRoles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["role", "required"],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "description": "Role name"
+                  },
+                  "required": {
+                    "type": "boolean",
+                    "description": "Is this role required for approval?"
+                  }
+                }
+              }
+            },
+            "thresholdAmount": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Amount above which approval is required"
+            },
+            "alwaysRequireApproval": {
+              "type": "boolean",
+              "description": "Force approval for all transactions"
+            }
+          }
+        }
+      }
+    },
+    "transactionLimits": {
+      "type": "object",
+      "required": ["automated"],
+      "properties": {
+        "automated": {
+          "type": "object",
+          "required": ["singleTransaction"],
+          "properties": {
+            "singleTransaction": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Maximum single transaction amount"
+            },
+            "dailyLimit": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Maximum daily aggregate amount"
+            },
+            "monthlyLimit": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Maximum monthly aggregate amount"
+            }
+          }
+        }
+      }
+    },
+    "apiSettings": {
+      "type": "object",
+      "required": ["ipWhitelist"],
+      "properties": {
+        "ipWhitelist": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}$",
+            "description": "IP address allowed to use the API"
+          }
+        },
+        "webhookEndpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint for transaction status updates"
+        }
+      }
+    }
+  }
+}

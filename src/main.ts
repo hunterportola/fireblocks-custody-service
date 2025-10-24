@@ -17,9 +17,16 @@ const fireblocks = new Fireblocks({
     secretKey: secretKey,
 });
 
+// Export functions for use in other modules
+export { fireblocks };
+
+// Example usage - uncomment to run
+// createVault()
+// getVaultPagedAccounts(10)
+// createTransaction("ETH_TEST5", "0.1", "0", "1")
 
 // creating a new vault account
-async function createVault() {
+export async function createVault() {
     try {
         const vault = await fireblocks.vaults.createVaultAccount({
             createVaultAccountRequest: {
@@ -34,8 +41,8 @@ async function createVault() {
     }
 }
 
-//retrive vault accounts
-async function getVaultPagedAccounts(limit: number) {
+//retrieve vault accounts
+export async function getVaultPagedAccounts(limit: number) {
     try {
         const vaults = await fireblocks.vaults.getPagedVaultAccounts({
             limit
@@ -47,7 +54,7 @@ async function getVaultPagedAccounts(limit: number) {
 }
 
 // create a transaction
-async function createTransaction(assetId, amount, srcId, destId) {
+export async function createTransaction(assetId: string, amount: string, srcId: string, destId: string) {
     let payload = {
         assetId,
         amount,
@@ -62,10 +69,5 @@ async function createTransaction(assetId, amount, srcId, destId) {
         note: "Your first transaction!"
     };
     const result = await fireblocks.transactions.createTransaction({ transactionRequest: payload });
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.data, null, 2));
 }
-
-
-// createVault()
-// getVaultPagedAccounts(10)
-// createTransaction("ETH_TEST5", "0.1", "0", "1")

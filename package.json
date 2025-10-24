@@ -1,0 +1,23 @@
+{
+  "name": "fireblocks-custody-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@fireblocks/ts-sdk": "^12.1.2",
+    "beautiful": "^0.0.1",
+    "dotenv": "^17.2.3",
+    "fireblocks-sdk": "^5.38.0",
+    "soup": "^0.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1"
+  }
+}

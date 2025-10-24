@@ -3,7 +3,7 @@
   "title": "Originator Configuration",
   "description": "Configuration schema for Fireblocks Custody Service loan originators",
   "type": "object",
-  "required": ["workspace", "lendingPartners", "vaultStructure", "approvalStructure", "transactionLimits", "apiSettings"],
+  "required": ["workspace", "lendingPartners", "vaultStructure", "approval", "transactionLimits", "apiSettings"],
   "properties": {
     "workspace": {
       "type": "object",
@@ -80,48 +80,136 @@
         }
       }
     },
-    "approvalStructure": {
+    "approval": {
       "type": "object",
-      "required": ["mode"],
+      "required": ["workflows"],
       "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["none", "single", "multi", "threshold"],
-          "description": "Approval workflow mode"
-        },
-        "requirements": {
-          "type": "object",
-          "properties": {
-            "numberOfApprovers": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Number of approvers required (0 = fully automated)"
-            },
-            "approverRoles": {
-              "type": "array",
-              "items": {
+        "workflows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["workflowId", "name", "trigger", "steps"],
+            "properties": {
+              "workflowId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Unique identifier for this workflow"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Human-friendly workflow name"
+              },
+              "description": {
+                "type": "string"
+              },
+              "trigger": {
                 "type": "object",
-                "required": ["role", "required"],
+                "required": ["id", "predicate"],
                 "properties": {
-                  "role": {
+                  "id": {
                     "type": "string",
-                    "description": "Role name"
+                    "minLength": 1
                   },
-                  "required": {
-                    "type": "boolean",
-                    "description": "Is this role required for approval?"
+                  "description": {
+                    "type": "string"
+                  },
+                  "predicate": {
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "always",
+                          "amount_greater_than",
+                          "amount_less_than",
+                          "partner_is",
+                          "custom_expression"
+                        ]
+                      },
+                      "amount": {
+                        "type": "string",
+                        "pattern": "^-?\\d+(\\.\\d+)?$",
+                        "description": "Decimal amount used for amount-based predicates"
+                      },
+                      "partnerId": {
+                        "type": "string",
+                        "description": "Partner identifier for partner-based predicates"
+                      },
+                      "expression": {
+                        "type": "string",
+                        "description": "Custom expression to evaluate"
+                      }
+                    }
+                  }
+                }
+              },
+              "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "name", "approverRoleIds", "minApprovals"],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "approverRoleIds": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "minApprovals": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Minimum number of approvals required in this step"
+                    },
+                    "requiresSequentialApproval": {
+                      "type": "boolean"
+                    },
+                    "escalationRoleId": {
+                      "type": "string"
+                    },
+                    "onReject": {
+                      "type": "string",
+                      "enum": ["stop", "escalate", "continue"]
+                    }
+                  }
+                }
+              },
+              "autoApprove": {
+                "$ref": "#/properties/approval/properties/workflows/items/properties/trigger"
+              },
+              "timeoutBehaviour": {
+                "type": "object",
+                "required": ["timeoutHours", "onTimeout"],
+                "properties": {
+                  "timeoutHours": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "onTimeout": {
+                    "type": "string",
+                    "enum": ["auto_reject", "escalate", "manual_queue"]
+                  },
+                  "escalationRoleId": {
+                    "type": "string"
                   }
                 }
               }
-            },
-            "thresholdAmount": {
-              "type": "number",
-              "minimum": 0,
-              "description": "Amount above which approval is required"
-            },
-            "alwaysRequireApproval": {
-              "type": "boolean",
-              "description": "Force approval for all transactions"
             }
           }
         }

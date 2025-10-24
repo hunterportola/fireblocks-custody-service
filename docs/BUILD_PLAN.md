@@ -262,7 +262,7 @@ interface PendingDisbursement {
   recipientAddress: string;
   requiredApprovals: number;
   currentApprovals: ApprovalRecord[];
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'awaiting_approval' | 'approved' | 'rejected';
   createdAt: Date;
   metadata: any;
 }
@@ -298,7 +298,7 @@ export class ApprovalService {
       ...request,
       requiredApprovals: this.config.approvalStructure.requirements?.numberOfApprovers || 0,
       currentApprovals: [],
-      status: 'pending',
+      status: 'awaiting_approval',
       createdAt: new Date()
     };
     
@@ -403,7 +403,7 @@ export class DisbursementService {
     recipientWalletId: string;  // Must be whitelisted in Fireblocks
     metadata?: any;
   }): Promise<{ 
-    status: 'completed' | 'pending_approval';
+    status: 'executed' | 'awaiting_approval';
     transactionId?: string;
     pendingId?: string;
   }> {
@@ -417,7 +417,7 @@ export class DisbursementService {
       });
       
       return {
-        status: 'pending_approval',
+        status: 'awaiting_approval',
         pendingId: pending.id
       };
     }
@@ -426,7 +426,7 @@ export class DisbursementService {
     const transaction = await this.executeDisbursement(request);
     
     return {
-      status: 'completed',
+      status: 'executed',
       transactionId: transaction.id
     };
   }

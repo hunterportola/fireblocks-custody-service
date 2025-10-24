@@ -5,14 +5,27 @@
 
 import { FireblocksClientManager } from '../core/fireblocks-client';
 import { handleFireblocksError } from '../core/error-handler';
-import { VaultAsset } from '@fireblocks/ts-sdk';
+import type {
+  Asset,
+  FireblocksResponse,
+  GetSupportedAssetsResponse,
+  GetVaultAssetsResponse,
+  VaultAsset,
+} from '@fireblocks/ts-sdk';
 
 /**
  * Service for managing assets within vault accounts
  */
 export class AssetManager {
   private fireblocks = FireblocksClientManager.getInstance();
-  
+
+  private unwrapResponse<T>(response: FireblocksResponse<T>): T {
+    if (!response || typeof response !== 'object' || response.data === undefined) {
+      throw new Error('Unexpected Fireblocks response structure');
+    }
+    return response.data;
+  }
+
   /**
    * Get the balance of a specific asset in a vault
    * @param vaultId - Vault account ID
@@ -21,21 +34,19 @@ export class AssetManager {
    */
   async getAssetBalance(vaultId: string, assetId: string): Promise<VaultAsset | null> {
     try {
-      // getVaultAccountAsset expects an object with vaultAccountId and assetId
       const response = await this.fireblocks.vaults.getVaultAccountAsset({
         vaultAccountId: vaultId,
-        assetId: assetId
+        assetId: assetId,
       });
-      return response.data;
+      return this.unwrapResponse(response);
     } catch (error: any) {
-      // Asset might not be activated yet
       if (error?.response?.status === 404) {
         return null;
       }
       handleFireblocksError(error);
     }
   }
-  
+
   /**
    * Get all assets balance summary (not specific to a single vault)
    * Note: This returns assets across all vaults, filtered by optional name prefix/suffix
@@ -46,18 +57,18 @@ export class AssetManager {
   async getVaultAssetsSummary(
     accountNamePrefix?: string,
     accountNameSuffix?: string
-  ): Promise<any> {
+  ): Promise<GetVaultAssetsResponse> {
     try {
       const response = await this.fireblocks.vaults.getVaultAssets({
         accountNamePrefix,
-        accountNameSuffix
+        accountNameSuffix,
       });
-      return response.data;
+      return this.unwrapResponse(response);
     } catch (error) {
       handleFireblocksError(error);
     }
   }
-  
+
   /**
    * Check if a vault has sufficient balance for a transaction
    * @param vaultId - Vault account ID
@@ -65,36 +76,32 @@ export class AssetManager {
    * @param amount - Required amount (as string for precision)
    * @returns True if sufficient balance exists
    */
-  async hasSufficientBalance(
-    vaultId: string,
-    assetId: string,
-    amount: string
-  ): Promise<boolean> {
+  async hasSufficientBalance(vaultId: string, assetId: string, amount: string): Promise<boolean> {
     const asset = await this.getAssetBalance(vaultId, assetId);
-    
+
     if (!asset || !asset.available) {
       return false;
     }
-    
+
     const available = parseFloat(asset.available);
     const required = parseFloat(amount);
-    
+
     return available >= required;
   }
-  
+
   /**
    * Get all supported assets in the workspace
    * @returns Array of supported asset information
    */
-  async getSupportedAssets() {
+  async getSupportedAssets(): Promise<GetSupportedAssetsResponse> {
     try {
       const response = await this.fireblocks.blockchainsAssets.getSupportedAssets();
-      return response.data;
+      return this.unwrapResponse(response);
     } catch (error) {
       handleFireblocksError(error);
     }
   }
-  
+
   /**
    * Validate that an asset ID exists and is supported
    * @param assetId - Asset ID to validate
@@ -103,24 +110,23 @@ export class AssetManager {
   async validateAssetId(assetId: string): Promise<boolean> {
     try {
       const supportedAssets = await this.getSupportedAssets();
-      return supportedAssets.some(asset => asset.id === assetId);
+      return supportedAssets.some((asset) => asset.id === assetId);
     } catch (error) {
-      console.error(`Failed to validate asset ID ${assetId}:`, error);
-      return false;
+      handleFireblocksError(error);
     }
   }
-  
+
   /**
    * Get asset details including current price
    * @param assetId - Asset ID
    * @returns Asset details with price information
    */
-  async getAssetDetails(assetId: string) {
+  async getAssetDetails(assetId: string): Promise<Asset> {
     try {
       const response = await this.fireblocks.blockchainsAssets.getAsset({
-        id: assetId
+        id: assetId,
       });
-      return response.data;
+      return this.unwrapResponse(response);
     } catch (error) {
       handleFireblocksError(error);
     }

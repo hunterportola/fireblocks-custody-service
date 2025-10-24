@@ -73,7 +73,7 @@ interface OriginatorConfiguration {
   approvalStructure: {
     mode: 'none' | 'single' | 'multi' | 'threshold';
     requirements?: {
-      numberOfApprovers?: number;    // 0 = fully automated, 1+ = human required
+      numberOfApprovers: number;     // Required: 0 = fully automated, 1+ = human required
       approverRoles?: Array<{
         role: string;                // e.g., "Risk Officer", "Compliance Manager"
         required: boolean;           // Must this role always approve?
@@ -394,7 +394,7 @@ class ApprovalManager {
     await this.notifyApprovers(pendingId, this.config.approvalStructure.requirements?.approverRoles);
     
     return {
-      status: 'pending_approval',
+      status: 'awaiting_approval',
       pendingId,
       requiredApprovals: this.config.approvalStructure.requirements.numberOfApprovers
     };
@@ -534,7 +534,7 @@ class MigrationHelper {
     }
     
     // Rule 3: Require approval for configured scenarios
-    if (config.approvalStructure.requirements?.numberOfApprovers > 0) {
+    if (config.approvalStructure.mode !== 'none' && config.approvalStructure.requirements?.numberOfApprovers > 0) {
       rules.push({
         action: 'REQUIRE_APPROVAL',
         operators: { userGroups: { ids: ['api-disbursement-group'] } },
@@ -598,7 +598,7 @@ class MigrationHelper {
 import { Fireblocks, BasePath, TransferPeerPathType } from '@fireblocks/ts-sdk';
 import { OriginatorConfiguration } from './src/config/types';
 import { VaultProvisioner } from './src/provisioner/vault-provisioner';
-import { ConfigurationValidator } from './src/config/validator';
+import { ConfigurationValidator } from './src/config/validator-strict';
 
 // Example 1: Fully Automated Configuration (No Approvals)
 const automatedConfig: OriginatorConfiguration = {
@@ -621,7 +621,10 @@ const automatedConfig: OriginatorConfiguration = {
     defaultAsset: "USDC_ETH"
   },
   approvalStructure: {
-    mode: "none"  // Fully automated, no human approval needed
+    mode: "none",  // Fully automated, no human approval needed
+    requirements: {
+      numberOfApprovers: 0  // 0 for fully automated operation
+    }
   },
   transactionLimits: {
     automated: {

@@ -1,176 +1,267 @@
-/**
- * Configuration types for the Fireblocks Custody Service
- * These interfaces define the structure for originator configuration and user access
- */
+import type { ApprovalWorkflowDefinition } from '../approvals/types';
 
-/**
- * Main configuration interface for loan originators
- * This configuration is provided when setting up the custody service
- */
+export const WORKSPACE_ENVIRONMENTS = ['sandbox', 'testnet', 'mainnet'] as const;
+export type WorkspaceEnvironment = (typeof WORKSPACE_ENVIRONMENTS)[number];
+
+export type PartnerId = string;
+export type UserId = string;
+
+export type DecimalString = string;
+
+export type IsoDateString = string;
+
+export interface WorkspaceConfig {
+  name: string;
+  environment: WorkspaceEnvironment;
+}
+
+export interface LendingPartner {
+  id: PartnerId; 
+  name: string; 
+  enabled: boolean; 
+  
+  config?: {
+    customApprovalThreshold?: number; 
+    allowedAssets?: SupportedAsset[]; 
+    webhookUrl?: string; 
+  };
+}
+
+export interface LendingPartnersConfig {
+  partners: ReadonlyArray<LendingPartner>;
+}
+
+export interface VaultNamingConvention {
+  prefix: string;
+  distributionSuffix: string;
+  collectionSuffix: string;
+}
+
+export type SupportedAsset =
+  | 'USDC_ETH'
+  | 'USDC_POLYGON'
+  | 'USDC_ETH5'
+  | (string & {});
+
+export interface VaultStructureConfig {
+  namingConvention: VaultNamingConvention;
+  defaultAsset: SupportedAsset;
+  
+  
+  vaultDefaults?: {
+    autoFuel?: boolean; 
+    hiddenOnUI?: boolean; 
+  };
+}
+
+export interface TransactionAutomationLimits {
+  singleTransaction: number;
+  dailyLimit?: number;
+  monthlyLimit?: number;
+}
+
+export interface TransactionLimitsConfig {
+  automated: TransactionAutomationLimits;
+}
+
+export interface ApiSettingsConfig {
+  ipWhitelist: ReadonlyArray<string>;
+  webhookEndpoint?: string;
+}
+
+export interface BorrowerInfo {
+  borrowerId: string;
+  name: string;
+  email?: string;
+  [key: string]: unknown;
+}
+
+export interface LoanTerms {
+  startDate: string;
+  maturityDate: string;
+  interestRateBps: number;
+  paymentFrequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
+  [key: string]: unknown;
+}
+
+export interface DisbursementMetadata {
+  borrowerInfo?: BorrowerInfo;
+  loanTerms?: LoanTerms;
+  [key: string]: unknown;
+}
+
+export interface RolePermissions {
+  viewDistributions: boolean;
+  viewCollections: boolean;
+  initiateDisbursements: boolean;
+  approveDisbursements: boolean;
+  viewReports?: boolean;
+  manageRoles?: boolean;
+  configureSettings?: boolean;
+}
+
+export interface RoleDefinition {
+  roleId: string;
+  roleName: string;
+  description: string;
+  permissions: RolePermissions;
+  requiresApproval: boolean;
+  maxUsers?: number;
+}
+
+export interface ApprovalConfiguration {
+  workflows: ReadonlyArray<ApprovalWorkflowDefinition>;
+}
+
 export interface OriginatorConfiguration {
-  // Basic workspace information
-  workspace: {
-    name: string;                    // Company/originator name
-    environment: 'sandbox' | 'testnet' | 'mainnet';
+  workspace: WorkspaceConfig;
+  lendingPartners: LendingPartnersConfig;
+  vaultStructure: VaultStructureConfig;
+  approval: ApprovalConfiguration;
+  transactionLimits: TransactionLimitsConfig;
+  apiSettings: ApiSettingsConfig;
+  roleDefinitions?: RoleDefinition[];
+}
+
+export interface PortolaWorkspace {
+  
+  workspace: WorkspaceConfig;
+  fireblocksWorkspaceId: string; 
+  
+  
+  partners: {
+    total: number; 
+    active: number; 
+    vaultPairs: Readonly<Record<PartnerId, LendingPartnerVaults>>; 
   };
   
-  // Lending partners who will receive disbursements
-  lendingPartners: {
-    partners: Array<{
-      id: string;                    // Unique partner identifier
-      name: string;                  // Partner display name
-      enabled: boolean;              // Active/inactive status
-    }>;
+  
+  stats: {
+    totalVaultAccounts: number; 
+    totalDisbursedAllTime: DecimalString; 
+    totalCollectedAllTime: DecimalString; 
+    lastUpdated: IsoDateString;
   };
   
-  // Vault naming and structure configuration
-  vaultStructure: {
-    namingConvention: {
-      prefix: string;                // Company prefix (e.g., "ACME")
-      distributionSuffix: string;    // Suffix for distribution vaults (e.g., "_DIST_USDC")
-      collectionSuffix: string;      // Suffix for collection vaults (e.g., "_COLL_USDC")
-    };
-    defaultAsset: string;            // Fireblocks asset ID (e.g., "USDC_ETH", "USDC_POLYGON")
-  };
   
-  // Approval workflow configuration
-  approvalStructure: {
-    mode: 'none' | 'single' | 'multi' | 'threshold';
-    requirements?: {
-      numberOfApprovers?: number;    // 0 = fully automated, 1+ = human approval required
-      approverRoles?: Array<{
-        role: string;                // Role name (e.g., "Risk Officer", "Compliance Manager")
-        required: boolean;           // Is this role required for approval?
-      }>;
-      thresholdAmount?: number;      // Amount (in USD) above which approval is required
-      alwaysRequireApproval?: boolean; // Force approval for ALL transactions
-    };
-  };
-  
-  // Transaction limits and controls
-  transactionLimits: {
-    automated: {
-      singleTransaction: number;     // Max amount for a single automated transaction
-      dailyLimit?: number;           // Optional daily aggregate limit
-      monthlyLimit?: number;         // Optional monthly aggregate limit
-    };
-  };
-  
-  // API and integration settings
-  apiSettings: {
-    ipWhitelist: string[];           // IP addresses allowed to use the API
-    webhookEndpoint?: string;        // Endpoint for transaction status updates
+  globalSettings: {
+    defaultWorkflowId?: string;
+    defaultTransactionLimits: TransactionAutomationLimits;
+    masterWebhookUrl?: string; 
   };
 }
 
-/**
- * User access request interface
- * Used when individuals request access to the custody service
- */
+export interface UserInfo {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phoneNumber?: string;
+}
+
+export interface RoleRequest {
+  requestedRoleId: string;
+  justification: string;
+  department: string;
+  managerId?: string;
+}
+
 export interface UserAccessRequest {
-  // Personal information
-  userInfo: {
-    firstName: string;
-    lastName: string;
-    email: string;
-    phoneNumber?: string;
-  };
-  
-  // Role and department information
-  roleRequest: {
-    requestedRole: string;           // Role being requested (e.g., "Loan Officer", "Risk Approver")
-    justification: string;           // Why they need this access
-    department: string;              // Their department
-    managerId?: string;              // Manager ID for approval routing
-  };
-  
-  // Specific access needs
-  accessNeeds: {
-    viewDistributions: boolean;      // Can view distribution vaults
-    viewCollections: boolean;        // Can view collection vaults
-    initiateDisbursements: boolean;  // Can create loan disbursements
-    approveDisbursements: boolean;   // Can approve pending disbursements
-  };
-  
-  // Request metadata
+  userInfo: UserInfo;
+  roleRequest: RoleRequest;
   metadata: {
-    requestId: string;               // Unique request identifier
-    timestamp: string;               // ISO timestamp of request
+    requestId: string;
+    timestamp: string;
     status: 'pending' | 'approved' | 'rejected';
-    adminNotes?: string;             // Admin comments on approval/rejection
+    adminNotes?: string;
   };
 }
 
-/**
- * Vault pair interface for partner vaults
- */
+export interface UserWithRole {
+  userId: UserId;
+  userInfo: UserInfo;
+  assignedRoleId: string;
+  department: string;
+  managerId?: string;
+  assignedAt: IsoDateString;
+  assignedBy: UserId;
+  expiresAt?: IsoDateString;
+  status: 'active' | 'suspended' | 'revoked';
+}
+
+export interface VaultAccount {
+  id: string; 
+  name: string; 
+  assetId: string; 
+}
+
+export interface PartnerTransactionPolicy {
+  
+  tapRuleIds: ReadonlyArray<string>;
+  
+  pendingDraftRuleId?: string;
+  
+  lastSyncedAt: IsoDateString;
+}
+
+export interface LendingPartnerVaults {
+  partnerId: PartnerId; 
+  partnerName: string; 
+  distribution: VaultAccount; 
+  collection: VaultAccount; 
+  
+  
+  permissions: {
+    allowedUsers?: ReadonlyArray<UserId>; 
+    allowedRoles?: ReadonlyArray<RoleDefinition['roleId']>; 
+    transactionPolicy?: PartnerTransactionPolicy;
+  };
+  
+  
+  metadata: {
+    createdAt: IsoDateString; 
+    lastActivityAt?: IsoDateString; 
+    totalDisbursed?: DecimalString; 
+    totalCollected?: DecimalString; 
+    activeLoans?: number; 
+  };
+}
+
 export interface VaultPair {
-  distribution: {
-    id: string;
-    name: string;
-    assetId: string;
-  };
-  collection: {
-    id: string;
-    name: string;
-    assetId: string;
-  };
+  distribution: VaultAccount;
+  collection: VaultAccount;
 }
 
-/**
- * Disbursement request interface
- */
 export interface DisbursementRequest {
-  loanId: string;                    // Unique loan identifier (used for idempotency)
-  partnerId: string;                 // Lending partner ID
-  amount: string;                    // Amount to disburse (as string for precision)
-  recipientWalletId: string;         // Whitelisted wallet ID in Fireblocks
-  metadata?: {                       // Optional metadata
-    borrowerInfo?: any;
-    loanTerms?: any;
-    [key: string]: any;
-  };
+  loanId: string;
+  partnerId: PartnerId;
+  amount: string;
+  recipientWalletId: string;
+  metadata?: DisbursementMetadata;
 }
 
-/**
- * Disbursement result interface
- */
-export interface DisbursementResult {
-  status: 'completed' | 'pending_approval' | 'failed';
-  transactionId?: string;            // Fireblocks transaction ID if completed
-  pendingId?: string;                // Pending disbursement ID if approval required
-  error?: string;                    // Error message if failed
-  requiredApprovals?: number;        // Number of approvals needed
-}
+export type DisbursementResult =
+  | {
+      status: 'executed';
+      transactionId: string;
+    }
+  | {
+      status: 'awaiting_approval';
+      pendingId: string;
+      requiredApprovals: number;
+    }
+  | {
+      status: 'failed';
+      error: string;
+      transactionId?: string;
+      pendingId?: string;
+    };
 
-/**
- * Approval request interface
- */
 export interface ApprovalRequest {
   userId: string;
   role: string;
   comments?: string;
 }
 
-/**
- * Pending disbursement interface
- */
-export interface PendingDisbursement {
-  id: string;
-  loanId: string;
-  partnerId: string;
-  amount: string;
-  recipientAddress: string;
-  requiredApprovals: number;
-  currentApprovals: ApprovalRecord[];
-  status: 'pending' | 'approved' | 'rejected';
-  createdAt: Date;
-  metadata?: any;
-}
-
-/**
- * Approval record interface
- */
 export interface ApprovalRecord {
   userId: string;
   role: string;
@@ -178,9 +269,19 @@ export interface ApprovalRecord {
   comments?: string;
 }
 
-/**
- * Configuration validation result
- */
+export interface PendingDisbursement {
+  id: string; 
+  loanId: string; 
+  partnerId: PartnerId; 
+  amount: string; 
+  recipientAddress: string; 
+  requiredApprovals: number; 
+  currentApprovals: ReadonlyArray<ApprovalRecord>; 
+  status: 'awaiting_approval' | 'approved' | 'rejected'; 
+  createdAt: IsoDateString; 
+  metadata?: DisbursementMetadata; 
+}
+
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];

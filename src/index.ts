@@ -4,7 +4,10 @@
  */
 
 export * from './config/types';
-export * from './config/validator';
+export * from './config/presets/roles';
+export * from './config/validator-strict';
+export * from './approvals/types';
+export * from './approvals/validator';
 export * from './core/fireblocks-client';
 export * from './core/error-handler';
 export * from './provisioner/vault-provisioner';
@@ -14,6 +17,6 @@ export * from './provisioner/asset-manager';
 export class FireblocksCustodyService {
   // TODO: Implement main service orchestration
   constructor(config: any) {
-    console.log('FireblocksCustodyService initialized with config:', config.workspace.name);
+    void config;
   }
 }

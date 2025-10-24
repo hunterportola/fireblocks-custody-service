@@ -1,3 +1,5 @@
+/* eslint-disable no-console */
+
 /**
  * Example usage of the Fireblocks Custody Service SDK
  * This demonstrates how an originator would use the SDK
@@ -26,17 +28,57 @@ async function main() {
       },
       defaultAsset: "USDC_ETH5" // Testnet USDC
     },
-    approvalStructure: {
-      mode: "threshold",
-      requirements: {
-        numberOfApprovers: 2,
-        approverRoles: [
-          { role: "Finance Manager", required: true },
-          { role: "Risk Officer", required: false }
-        ],
-        thresholdAmount: 50000,
-        alwaysRequireApproval: false
-      }
+    approval: {
+      workflows: [
+        {
+          workflowId: "wf-standard",
+          name: "Standard Review",
+          trigger: { id: "default", predicate: { kind: "always" } },
+          steps: [
+            {
+              id: "step-finance",
+              name: "Finance Manager Review",
+              approverRoleIds: ["finance_manager"],
+              minApprovals: 1
+            },
+            {
+              id: "step-compliance",
+              name: "Compliance Sign-off",
+              approverRoleIds: ["compliance_officer"],
+              minApprovals: 1,
+              escalationRoleId: "senior_reviewer"
+            }
+          ]
+        },
+        {
+          workflowId: "wf-high-value",
+          name: "High Value Approval",
+          trigger: {
+            id: "high-value",
+            predicate: { kind: "amount_greater_than", amount: "500000" }
+          },
+          steps: [
+            {
+              id: "step-senior",
+              name: "Senior Reviewer",
+              approverRoleIds: ["senior_reviewer"],
+              minApprovals: 1
+            },
+            {
+              id: "step-executive",
+              name: "Executive Approval",
+              approverRoleIds: ["executive_committee"],
+              minApprovals: 1,
+              requiresSequentialApproval: true
+            }
+          ],
+          timeoutBehaviour: {
+            timeoutHours: 24,
+            onTimeout: "escalate",
+            escalationRoleId: "executive_committee"
+          }
+        }
+      ]
     },
     transactionLimits: {
       automated: {
@@ -48,7 +90,69 @@ async function main() {
     apiSettings: {
       ipWhitelist: ["203.0.113.1", "203.0.113.2"],
       webhookEndpoint: "https://api.acmelending.com/fireblocks/webhook"
-    }
+    },
+    roleDefinitions: [
+      {
+        roleId: "finance_manager",
+        roleName: "Finance Manager",
+        description: "Reviews standard disbursements",
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false
+        },
+        requiresApproval: false
+      },
+      {
+        roleId: "compliance_officer",
+        roleName: "Compliance Officer",
+        description: "Reviews compliance-sensitive transactions",
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false
+        },
+        requiresApproval: true
+      },
+      {
+        roleId: "senior_reviewer",
+        roleName: "Senior Reviewer",
+        description: "Approves escalated transactions",
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false
+        },
+        requiresApproval: true
+      },
+      {
+        roleId: "executive_committee",
+        roleName: "Executive Committee",
+        description: "Final approval authority for large loans",
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false
+        },
+        requiresApproval: true
+      }
+    ]
   };
 
   try {
@@ -58,7 +162,8 @@ async function main() {
     console.log("✅ Fireblocks Custody Service initialized");
     console.log("📋 Configuration validated");
     console.log(`👥 ${config.lendingPartners.partners.length} lending partners configured`);
-    console.log(`🔐 Approval mode: ${config.approvalStructure.mode}`);
+    const primaryWorkflow = config.approval.workflows[0];
+    console.log(`🔐 Primary approval workflow: ${primaryWorkflow.name}`);
     console.log(`💰 Daily transaction limit: $${config.transactionLimits.automated.dailyLimit.toLocaleString()}`);
     
     // In a real implementation, you would:

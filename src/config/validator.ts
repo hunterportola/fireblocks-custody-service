@@ -1,271 +1,206 @@
 /**
- * Configuration validation for originator setup
- * Ensures all required fields are present and valid
+ * Configuration validation for originator setup - strict TypeScript version.
+ * Ensures all required fields are present, typed, and within acceptable ranges.
  */
 
-import { OriginatorConfiguration, ValidationResult } from './types';
-import { AssetManager } from '../provisioner/asset-manager';
+import { OriginatorConfiguration, RoleDefinition, ValidationResult } from './types';
+import { isNonEmptyString, isWorkspaceEnvironment } from '../utils/type-guards';
+import { validateApprovalWorkflows } from '../approvals/validator';
+
+type LendingPartner = OriginatorConfiguration['lendingPartners']['partners'][number];
+
+const IPV4_REGEX = /^([0-9]{1,3}\.){3}[0-9]{1,3}$/;
+const PRIVATE_IP_PATTERNS = [
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+  /^192\.168\./,
+  /^127\./,
+];
+
+function isValidWorkspace(workspace: unknown): workspace is OriginatorConfiguration['workspace'] {
+  if (!workspace || typeof workspace !== 'object') return false;
+  const w = workspace as Record<string, unknown>;
+  return isNonEmptyString(w.name) && isWorkspaceEnvironment(w.environment);
+}
+
+function isValidPartner(partner: unknown): partner is LendingPartner {
+  if (!partner || typeof partner !== 'object') return false;
+  const p = partner as Record<string, unknown>;
+  return (
+    isNonEmptyString(p.id) &&
+    isNonEmptyString(p.name) &&
+    typeof p.enabled === 'boolean'
+  );
+}
+
+function isValidLendingPartners(
+  partners: unknown
+): partners is OriginatorConfiguration['lendingPartners'] {
+  if (!partners || typeof partners !== 'object') return false;
+  const p = partners as Record<string, unknown>;
+  return Array.isArray(p.partners) && p.partners.length > 0 && p.partners.every(isValidPartner);
+}
+
+function isValidNamingConvention(
+  naming: unknown
+): naming is OriginatorConfiguration['vaultStructure']['namingConvention'] {
+  if (!naming || typeof naming !== 'object') return false;
+  const n = naming as Record<string, unknown>;
+  return (
+    isNonEmptyString(n.prefix) &&
+    /^[A-Z0-9_]+$/.test(n.prefix) &&
+    isNonEmptyString(n.distributionSuffix) &&
+    isNonEmptyString(n.collectionSuffix)
+  );
+}
+
+function isValidVaultStructure(vault: unknown): vault is OriginatorConfiguration['vaultStructure'] {
+  if (!vault || typeof vault !== 'object') return false;
+  const v = vault as Record<string, unknown>;
+  return isValidNamingConvention(v.namingConvention) && isNonEmptyString(v.defaultAsset);
+}
+
+function isApprovalConfiguration(
+  approval: unknown
+): approval is OriginatorConfiguration['approval'] {
+  if (!approval || typeof approval !== 'object') {
+    return false;
+  }
+
+  const candidate = approval as Record<string, unknown>;
+  return Array.isArray(candidate.workflows);
+}
+
+function isValidTransactionLimits(
+  limits: unknown
+): limits is OriginatorConfiguration['transactionLimits'] {
+  if (!limits || typeof limits !== 'object') return false;
+  const l = limits as Record<string, unknown>;
+  if (!l.automated || typeof l.automated !== 'object') return false;
+
+  const automated = l.automated as Record<string, unknown>;
+  if (typeof automated.singleTransaction !== 'number' || automated.singleTransaction <= 0) {
+    return false;
+  }
+
+  if (
+    automated.dailyLimit !== undefined &&
+    (typeof automated.dailyLimit !== 'number' || automated.dailyLimit <= 0)
+  ) {
+    return false;
+  }
+
+  if (
+    automated.monthlyLimit !== undefined &&
+    (typeof automated.monthlyLimit !== 'number' || automated.monthlyLimit <= 0)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidIpAddress(ip: unknown): ip is string {
+  if (typeof ip !== 'string') return false;
+  if (!IPV4_REGEX.test(ip)) return false;
+
+  return ip.split('.').every((segment) => {
+    const value = Number.parseInt(segment, 10);
+    return Number.isInteger(value) && value >= 0 && value <= 255;
+  });
+}
+
+function isValidUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidApiSettings(api: unknown): api is OriginatorConfiguration['apiSettings'] {
+  if (!api || typeof api !== 'object') return false;
+  const a = api as Record<string, unknown>;
+
+  if (!Array.isArray(a.ipWhitelist) || a.ipWhitelist.length === 0) return false;
+  if (!a.ipWhitelist.every(isValidIpAddress)) return false;
+
+  if (a.webhookEndpoint !== undefined && !isValidUrl(a.webhookEndpoint)) return false;
+
+  return true;
+}
 
 /**
- * Validates originator configuration
+ * Validates originator configuration with strict type checking.
  */
 export class ConfigurationValidator {
-  private assetManager = new AssetManager();
-  
-  /**
-   * Validate the complete originator configuration
-   * @param config - Configuration to validate
-   * @returns Validation result with errors and warnings
-   */
   async validate(config: OriginatorConfiguration): Promise<ValidationResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
-    
-    // Validate workspace
-    this.validateWorkspace(config.workspace, errors);
-    
-    // Validate lending partners
-    this.validateLendingPartners(config.lendingPartners, errors, warnings);
-    
-    // Validate vault structure
-    this.validateVaultStructure(config.vaultStructure, errors);
-    
-    // Validate approval structure
-    this.validateApprovalStructure(config.approvalStructure, errors, warnings);
-    
-    // Validate transaction limits
-    this.validateTransactionLimits(config.transactionLimits, errors, warnings);
-    
-    // Validate API settings
-    this.validateApiSettings(config.apiSettings, errors, warnings);
-    
-    // Validate asset ID (async)
-    const assetValid = await this.validateAssetId(config.vaultStructure.defaultAsset);
-    if (!assetValid) {
-      warnings.push(`Asset ID '${config.vaultStructure.defaultAsset}' could not be validated. Ensure it exists in your Fireblocks workspace.`);
+
+    if (!isValidWorkspace(config.workspace)) {
+      errors.push('Invalid workspace configuration');
     }
-    
+
+    if (!isValidLendingPartners(config.lendingPartners)) {
+      errors.push('Invalid lending partners configuration');
+    } else {
+      const enabledCount = config.lendingPartners.partners.filter((p) => p.enabled).length;
+      if (enabledCount === 0) {
+        warnings.push('No partners are currently enabled');
+      }
+
+      const ids = config.lendingPartners.partners.map((p) => p.id);
+      if (ids.length !== new Set(ids).size) {
+        errors.push('Duplicate partner IDs found');
+      }
+    }
+
+    if (!isValidVaultStructure(config.vaultStructure)) {
+      errors.push('Invalid vault structure configuration');
+    }
+
+    if (!isApprovalConfiguration(config.approval)) {
+      errors.push('Invalid approval configuration');
+    } else {
+      const roleDefinitions: ReadonlyArray<RoleDefinition> = config.roleDefinitions ?? [];
+      const { errors: approvalErrors, warnings: approvalWarnings } = validateApprovalWorkflows(
+        config.approval.workflows,
+        roleDefinitions
+      );
+      errors.push(...approvalErrors);
+      warnings.push(...approvalWarnings);
+    }
+
+    if (!isValidTransactionLimits(config.transactionLimits)) {
+      errors.push('Invalid transaction limits configuration');
+    } else {
+      const limits = config.transactionLimits.automated;
+      if (limits.dailyLimit && limits.dailyLimit < limits.singleTransaction) {
+        warnings.push('Daily limit is less than single transaction limit');
+      }
+      if (limits.monthlyLimit && limits.dailyLimit && limits.monthlyLimit < limits.dailyLimit) {
+        warnings.push('Monthly limit is less than daily limit');
+      }
+    }
+
+    if (!isValidApiSettings(config.apiSettings)) {
+      errors.push('Invalid API settings configuration');
+    } else {
+      const hasPrivateIp = config.apiSettings.ipWhitelist.some((ip) =>
+        PRIVATE_IP_PATTERNS.some((pattern) => pattern.test(ip))
+      );
+      if (hasPrivateIp) {
+        warnings.push('Private IP addresses detected in whitelist');
+      }
+    }
+
     return {
       isValid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     };
-  }
-  
-  private validateWorkspace(workspace: any, errors: string[]): void {
-    if (!workspace?.name || typeof workspace.name !== 'string' || workspace.name.trim() === '') {
-      errors.push('Workspace name is required');
-    }
-    
-    const validEnvironments = ['sandbox', 'testnet', 'mainnet'];
-    if (!workspace?.environment || !validEnvironments.includes(workspace.environment)) {
-      errors.push(`Workspace environment must be one of: ${validEnvironments.join(', ')}`);
-    }
-  }
-  
-  private validateLendingPartners(partners: any, errors: string[], warnings: string[]): void {
-    if (!partners?.partners || !Array.isArray(partners.partners)) {
-      errors.push('At least one lending partner must be configured');
-      return;
-    }
-    
-    if (partners.partners.length === 0) {
-      errors.push('At least one lending partner must be configured');
-      return;
-    }
-    
-    const seenIds = new Set<string>();
-    partners.partners.forEach((partner: any, index: number) => {
-      if (!partner.id || typeof partner.id !== 'string') {
-        errors.push(`Partner at index ${index} must have a valid ID`);
-      } else if (seenIds.has(partner.id)) {
-        errors.push(`Duplicate partner ID: ${partner.id}`);
-      } else {
-        seenIds.add(partner.id);
-      }
-      
-      if (!partner.name || typeof partner.name !== 'string') {
-        errors.push(`Partner ${partner.id || index} must have a valid name`);
-      }
-      
-      if (typeof partner.enabled !== 'boolean') {
-        errors.push(`Partner ${partner.id || index} must have 'enabled' set to true or false`);
-      }
-    });
-    
-    const enabledCount = partners.partners.filter((p: any) => p.enabled).length;
-    if (enabledCount === 0) {
-      warnings.push('No partners are currently enabled');
-    }
-  }
-  
-  private validateVaultStructure(vault: any, errors: string[]): void {
-    if (!vault?.namingConvention) {
-      errors.push('Vault naming convention is required');
-      return;
-    }
-    
-    if (!vault.namingConvention.prefix || vault.namingConvention.prefix.trim() === '') {
-      errors.push('Vault naming prefix is required');
-    } else if (!/^[A-Z0-9_]+$/.test(vault.namingConvention.prefix)) {
-      errors.push('Vault naming prefix should only contain uppercase letters, numbers, and underscores');
-    }
-    
-    if (!vault.namingConvention.distributionSuffix) {
-      errors.push('Distribution vault suffix is required');
-    }
-    
-    if (!vault.namingConvention.collectionSuffix) {
-      errors.push('Collection vault suffix is required');
-    }
-    
-    if (!vault.defaultAsset || vault.defaultAsset.trim() === '') {
-      errors.push('Default asset is required');
-    }
-  }
-  
-  private validateApprovalStructure(approval: any, errors: string[], _warnings: string[]): void {
-    if (!approval?.mode) {
-      errors.push('Approval mode is required');
-      return;
-    }
-    
-    const validModes = ['none', 'single', 'multi', 'threshold'];
-    if (!validModes.includes(approval.mode)) {
-      errors.push(`Approval mode must be one of: ${validModes.join(', ')}`);
-    }
-    
-    if (approval.mode !== 'none' && !approval.requirements) {
-      errors.push('Approval requirements must be specified when mode is not "none"');
-      return;
-    }
-    
-    if (approval.requirements) {
-      const reqs = approval.requirements;
-      
-      if (typeof reqs.numberOfApprovers !== 'undefined') {
-        if (!Number.isInteger(reqs.numberOfApprovers) || reqs.numberOfApprovers < 0) {
-          errors.push('Number of approvers must be a non-negative integer');
-        }
-        
-        if (reqs.numberOfApprovers > 0 && (!reqs.approverRoles || reqs.approverRoles.length === 0)) {
-          errors.push('Approver roles must be specified when numberOfApprovers > 0');
-        }
-      }
-      
-      if (reqs.approverRoles && Array.isArray(reqs.approverRoles)) {
-        const requiredRoles = reqs.approverRoles.filter((r: any) => r.required);
-        if (requiredRoles.length > reqs.numberOfApprovers) {
-          errors.push('Number of required roles exceeds numberOfApprovers');
-        }
-      }
-      
-      if (typeof reqs.thresholdAmount !== 'undefined') {
-        if (typeof reqs.thresholdAmount !== 'number' || reqs.thresholdAmount < 0) {
-          errors.push('Threshold amount must be a non-negative number');
-        }
-      }
-    }
-  }
-  
-  private validateTransactionLimits(limits: any, errors: string[], warnings: string[]): void {
-    if (!limits?.automated) {
-      errors.push('Automated transaction limits must be specified');
-      return;
-    }
-    
-    if (typeof limits.automated.singleTransaction !== 'number' || limits.automated.singleTransaction <= 0) {
-      errors.push('Single transaction limit must be a positive number');
-    }
-    
-    if (limits.automated.dailyLimit && 
-        (typeof limits.automated.dailyLimit !== 'number' || limits.automated.dailyLimit <= 0)) {
-      errors.push('Daily limit must be a positive number if specified');
-    }
-    
-    if (limits.automated.monthlyLimit && 
-        (typeof limits.automated.monthlyLimit !== 'number' || limits.automated.monthlyLimit <= 0)) {
-      errors.push('Monthly limit must be a positive number if specified');
-    }
-    
-    // Logical checks
-    if (limits.automated.dailyLimit && limits.automated.dailyLimit < limits.automated.singleTransaction) {
-      warnings.push('Daily limit is less than single transaction limit');
-    }
-    
-    if (limits.automated.monthlyLimit && limits.automated.dailyLimit && 
-        limits.automated.monthlyLimit < limits.automated.dailyLimit) {
-      warnings.push('Monthly limit is less than daily limit');
-    }
-  }
-  
-  private validateApiSettings(api: any, errors: string[], warnings: string[]): void {
-    if (!api?.ipWhitelist || !Array.isArray(api.ipWhitelist) || api.ipWhitelist.length === 0) {
-      errors.push('At least one IP address must be whitelisted');
-      return;
-    }
-    
-    // Note: We're NOT enforcing the "no private IPs" rule mentioned in the README
-    // because sandbox environments often use private IPs for testing
-    api.ipWhitelist.forEach((ip: any, index: number) => {
-      if (typeof ip !== 'string' || !this.isValidIpAddress(ip)) {
-        errors.push(`Invalid IP address at index ${index}: ${ip}`);
-      }
-    });
-    
-    // Check for common private IP ranges and warn
-    const privateIpPatterns = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-      /^192\.168\./,
-      /^127\./
-    ];
-    
-    const hasPrivateIps = api.ipWhitelist.some((ip: string) => 
-      privateIpPatterns.some(pattern => pattern.test(ip))
-    );
-    
-    if (hasPrivateIps) {
-      warnings.push('Private IP addresses detected in whitelist. Ensure these are replaced with public IPs for production.');
-    }
-    
-    if (api.webhookEndpoint) {
-      if (typeof api.webhookEndpoint !== 'string' || !this.isValidUrl(api.webhookEndpoint)) {
-        errors.push('Webhook endpoint must be a valid URL');
-      }
-    }
-  }
-  
-  private isValidIpAddress(ip: string): boolean {
-    // Basic IPv4 validation
-    const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (!ipv4Pattern.test(ip)) {
-      return false;
-    }
-    
-    const parts = ip.split('.');
-    return parts.every(part => {
-      const num = parseInt(part, 10);
-      return num >= 0 && num <= 255;
-    });
-  }
-  
-  private isValidUrl(url: string): boolean {
-    try {
-      new URL(url);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  
-  private async validateAssetId(assetId: string): Promise<boolean> {
-    try {
-      return await this.assetManager.validateAssetId(assetId);
-    } catch (error) {
-      // If we can't validate (e.g., not connected), return true to not block
-      console.warn('Unable to validate asset ID:', error);
-      return true;
-    }
   }
 }

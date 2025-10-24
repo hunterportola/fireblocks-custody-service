@@ -1,3 +1,5 @@
+/* eslint-disable no-console */
+
 /**
  * Test script to validate all modules compile and can be imported correctly
  */
@@ -11,7 +13,7 @@ import {
   type DisbursementRequest,
   type VaultPair 
 } from './src/config/types';
-import { ConfigurationValidator } from './src/config/validator';
+import { ConfigurationValidator } from './src/config/validator-strict';
 import { FireblocksClientManager } from './src/core/fireblocks-client';
 import { FireblocksServiceError, ErrorCodes, handleFireblocksError } from './src/core/error-handler';
 import { VaultProvisioner } from './src/provisioner/vault-provisioner';
@@ -51,16 +53,25 @@ const testConfig: OriginatorConfiguration = {
     },
     defaultAsset: "USDC_ETH5" // Testnet USDC
   },
-  approvalStructure: {
-    mode: "threshold",
-    requirements: {
-      numberOfApprovers: 1,
-      approverRoles: [
-        { role: "Test Approver", required: true }
-      ],
-      thresholdAmount: 10000,
-      alwaysRequireApproval: false
-    }
+  approval: {
+    workflows: [
+      {
+        workflowId: "wf-threshold",
+        name: "Threshold Approval",
+        trigger: {
+          id: "high-value",
+          predicate: { kind: "amount_greater_than", amount: "10000" }
+        },
+        steps: [
+          {
+            id: "step-compliance",
+            name: "Compliance review",
+            approverRoleIds: ["compliance_officer"],
+            minApprovals: 1
+          }
+        ]
+      }
+    ]
   },
   transactionLimits: {
     automated: {
@@ -72,7 +83,24 @@ const testConfig: OriginatorConfiguration = {
   apiSettings: {
     ipWhitelist: ["203.0.113.1"],
     webhookEndpoint: "https://test.example.com/webhook"
-  }
+  },
+  roleDefinitions: [
+    {
+      roleId: "compliance_officer",
+      roleName: "Compliance Officer",
+      description: "Reviews high-risk transactions",
+      permissions: {
+        viewDistributions: true,
+        viewCollections: true,
+        initiateDisbursements: false,
+        approveDisbursements: true,
+        viewReports: true,
+        manageRoles: false,
+        configureSettings: false
+      },
+      requiresApproval: true
+    }
+  ]
 };
 
 console.log('✅ Test configuration created');

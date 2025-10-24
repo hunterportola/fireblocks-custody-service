@@ -26,23 +26,23 @@ export const ErrorCodes = {
   // Configuration errors
   INVALID_CONFIG: 'INVALID_CONFIG',
   MISSING_CREDENTIALS: 'MISSING_CREDENTIALS',
-  
+
   // Vault errors
   VAULT_CREATION_FAILED: 'VAULT_CREATION_FAILED',
   VAULT_NOT_FOUND: 'VAULT_NOT_FOUND',
   ASSET_ACTIVATION_FAILED: 'ASSET_ACTIVATION_FAILED',
-  
+
   // Transaction errors
   TRANSACTION_FAILED: 'TRANSACTION_FAILED',
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
   INVALID_DESTINATION: 'INVALID_DESTINATION',
   DUPLICATE_TRANSACTION: 'DUPLICATE_TRANSACTION',
-  
+
   // Approval errors
   APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
   UNAUTHORIZED_APPROVER: 'UNAUTHORIZED_APPROVER',
   ALREADY_APPROVED: 'ALREADY_APPROVED',
-  
+
   // API errors
   API_ERROR: 'API_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
@@ -55,12 +55,12 @@ export const ErrorCodes = {
 export function handleFireblocksError(error: unknown): never {
   if (error instanceof AxiosError) {
     const response = error.response;
-    
+
     if (response) {
       // API returned an error response
       const status = response.status;
       const data = response.data;
-      
+
       // Common Fireblocks error patterns
       if (status === 400) {
         if (data?.message?.includes('already exists')) {
@@ -78,7 +78,7 @@ export function handleFireblocksError(error: unknown): never {
           data
         );
       }
-      
+
       if (status === 401) {
         throw new FireblocksServiceError(
           'Authentication failed - check API credentials',
@@ -86,7 +86,7 @@ export function handleFireblocksError(error: unknown): never {
           status
         );
       }
-      
+
       if (status === 403) {
         throw new FireblocksServiceError(
           'Access forbidden - check permissions',
@@ -95,7 +95,7 @@ export function handleFireblocksError(error: unknown): never {
           data
         );
       }
-      
+
       if (status === 404) {
         throw new FireblocksServiceError(
           data?.message || 'Resource not found',
@@ -104,7 +104,7 @@ export function handleFireblocksError(error: unknown): never {
           data
         );
       }
-      
+
       if (status === 429) {
         throw new FireblocksServiceError(
           'Rate limit exceeded - please retry later',
@@ -112,7 +112,7 @@ export function handleFireblocksError(error: unknown): never {
           status
         );
       }
-      
+
       // Generic API error
       throw new FireblocksServiceError(
         data?.message || `API error: ${status}`,
@@ -121,7 +121,7 @@ export function handleFireblocksError(error: unknown): never {
         data
       );
     }
-    
+
     // Network error
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       throw new FireblocksServiceError(
@@ -130,7 +130,7 @@ export function handleFireblocksError(error: unknown): never {
       );
     }
   }
-  
+
   // Unknown error
   throw new FireblocksServiceError(
     error instanceof Error ? error.message : 'Unknown error occurred',
@@ -147,13 +147,13 @@ export async function retryWithBackoff<T>(
   initialDelay: number = 1000
 ): Promise<T> {
   let lastError: unknown;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await operation();
     } catch (error) {
       lastError = error;
-      
+
       // Don't retry certain errors
       if (error instanceof FireblocksServiceError) {
         const nonRetryableCodes = [
@@ -162,20 +162,20 @@ export async function retryWithBackoff<T>(
           ErrorCodes.DUPLICATE_TRANSACTION,
           ErrorCodes.UNAUTHORIZED_APPROVER,
         ];
-        
+
         if (nonRetryableCodes.includes(error.code as any)) {
           throw error;
         }
       }
-      
+
       // Wait before retrying (exponential backoff)
       if (attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
-  
+
   // All retries failed
   throw lastError;
 }

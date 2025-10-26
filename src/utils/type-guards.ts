@@ -1,4 +1,4 @@
-import { WORKSPACE_ENVIRONMENTS, WorkspaceEnvironment } from '../config/types';
+import { TURNKEY_ENVIRONMENTS, TurnkeyEnvironment } from '../config/types';
 
 export const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
@@ -39,5 +39,5 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string' && item.trim().length > 0);
 
-export const isWorkspaceEnvironment = (value: unknown): value is WorkspaceEnvironment =>
-  typeof value === 'string' && (WORKSPACE_ENVIRONMENTS as ReadonlyArray<string>).includes(value);
+export const isTurnkeyEnvironment = (value: unknown): value is TurnkeyEnvironment =>
+  typeof value === 'string' && (TURNKEY_ENVIRONMENTS as ReadonlyArray<string>).includes(value);

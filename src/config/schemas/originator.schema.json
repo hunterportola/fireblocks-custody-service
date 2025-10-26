@@ -1,264 +1,913 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Originator Configuration",
-  "description": "Configuration schema for Fireblocks Custody Service loan originators",
+  "description": "Configuration schema for Turnkey Custody Service loan originators",
   "type": "object",
-  "required": ["workspace", "lendingPartners", "vaultStructure", "approval", "transactionLimits", "apiSettings"],
+  "additionalProperties": false,
+  "required": ["platform", "provisioning", "businessModel", "accessControl"],
   "properties": {
-    "workspace": {
+    "platform": {
       "type": "object",
-      "required": ["name", "environment"],
+      "additionalProperties": false,
+      "required": ["environment", "organizationId", "originator"],
+      "properties": {
+        "environment": {
+          "type": "string",
+          "enum": ["sandbox", "staging", "production"],
+          "description": "Turnkey API environment"
+        },
+        "organizationId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Parent Turnkey organization identifier"
+        },
+        "apiBaseUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "activityPoller": {
+          "$ref": "#/definitions/activityPollerConfig"
+        },
+        "originator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["originatorId", "displayName"],
+          "properties": {
+            "originatorId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "legalEntityName": {
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "provisioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nameTemplate", "rootQuorumThreshold", "rootUsers"],
+      "properties": {
+        "nameTemplate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Template used when creating sub-organization names"
+        },
+        "rootQuorumThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rootUsers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/rootUserTemplate"
+          }
+        },
+        "featureToggles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/featureToggle"
+          }
+        },
+        "provisioningWebhook": {
+          "$ref": "#/definitions/webhookConfig"
+        },
+        "defaultAutomationTemplateId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "businessModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["partners", "wallets"],
+      "properties": {
+        "partners": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["catalog"],
+          "properties": {
+            "catalog": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/partnerConfiguration"
+              }
+            },
+            "defaultPolicyIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "defaultWebhookTemplate": {
+              "$ref": "#/definitions/webhookConfig"
+            }
+          }
+        },
+        "wallets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["templates", "flows"],
+          "properties": {
+            "templates": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/walletTemplate"
+              }
+            },
+            "flows": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/definitions/walletFlowConfig"
+              }
+            }
+          }
+        }
+      }
+    },
+    "accessControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roles", "automation", "policies"],
+      "properties": {
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/userRoleDefinition"
+          }
+        },
+        "automation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["templates"],
+          "properties": {
+            "templates": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/automationUserTemplate"
+              }
+            },
+            "defaultTemplateId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionConfig": {
+              "$ref": "#/definitions/sessionConfiguration"
+            }
+          }
+        },
+        "policies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["templates", "defaultPolicyIds"],
+          "properties": {
+            "templates": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/policyTemplate"
+              }
+            },
+            "defaultPolicyIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "overridePolicyIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "monitoring": {
+          "$ref": "#/definitions/monitoringConfig"
+        },
+        "reporting": {
+          "$ref": "#/definitions/reportingConfig"
+        }
+      }
+    },
+    "compliance": {
+      "$ref": "#/definitions/complianceConfig"
+    }
+  },
+  "definitions": {
+    "activityPollerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "numRetries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "featureToggle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled"],
       "properties": {
         "name": {
           "type": "string",
-          "minLength": 1,
-          "description": "Company or originator name"
+          "minLength": 1
         },
-        "environment": {
-          "type": "string",
-          "enum": ["sandbox", "testnet", "mainnet"],
-          "description": "Fireblocks environment"
+        "enabled": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
         }
       }
     },
-    "lendingPartners": {
+    "webhookConfig": {
       "type": "object",
-      "required": ["partners"],
+      "additionalProperties": false,
+      "required": ["urlTemplate"],
       "properties": {
-        "partners": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["id", "name", "enabled"],
-            "properties": {
-              "id": {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9_-]+$",
-                "description": "Unique partner identifier"
-              },
-              "name": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Partner display name"
-              },
-              "enabled": {
-                "type": "boolean",
-                "description": "Active/inactive status"
-              }
-            }
+        "urlTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "authHeaderName": {
+          "type": "string"
+        },
+        "authSecretRef": {
+          "type": "string"
+        }
+      }
+    },
+    "rootUserApiKeySeed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiKeyNameTemplate", "curveType"],
+      "properties": {
+        "apiKeyNameTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "curveType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publicKeyRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expirationSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
           }
         }
       }
     },
-    "vaultStructure": {
+    "rootUserAuthenticatorSeed": {
       "type": "object",
-      "required": ["namingConvention", "defaultAsset"],
+      "additionalProperties": false,
+      "required": ["authenticatorNameTemplate"],
       "properties": {
-        "namingConvention": {
+        "authenticatorNameTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attestationRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enrollmentStrategy": {
+          "type": "string",
+          "enum": ["webauthn_passkey", "otp_email", "otp_sms", "manual"]
+        },
+        "metadata": {
           "type": "object",
-          "required": ["prefix", "distributionSuffix", "collectionSuffix"],
-          "properties": {
-            "prefix": {
-              "type": "string",
-              "pattern": "^[A-Z0-9_]+$",
-              "description": "Company prefix (uppercase letters, numbers, underscores)"
-            },
-            "distributionSuffix": {
-              "type": "string",
-              "description": "Suffix for distribution vaults"
-            },
-            "collectionSuffix": {
-              "type": "string",
-              "description": "Suffix for collection vaults"
-            }
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "rootUserOauthProviderSeed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerName", "oidcTokenRef"],
+      "properties": {
+        "providerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oidcTokenRef": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "rootUserTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["templateId", "userNameTemplate"],
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "userNameTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "userEmailTemplate": {
+          "type": "string"
+        },
+        "userPhoneNumberTemplate": {
+          "type": "string"
+        },
+        "apiKeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/rootUserApiKeySeed"
           }
         },
-        "defaultAsset": {
-          "type": "string",
-          "description": "Fireblocks asset ID (e.g., USDC_ETH, USDC_POLYGON)"
-        }
-      }
-    },
-    "approval": {
-      "type": "object",
-      "required": ["workflows"],
-      "properties": {
-        "workflows": {
+        "authenticators": {
           "type": "array",
-          "minItems": 1,
           "items": {
-            "type": "object",
-            "required": ["workflowId", "name", "trigger", "steps"],
-            "properties": {
-              "workflowId": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Unique identifier for this workflow"
-              },
-              "name": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Human-friendly workflow name"
-              },
-              "description": {
-                "type": "string"
-              },
-              "trigger": {
-                "type": "object",
-                "required": ["id", "predicate"],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "predicate": {
-                    "type": "object",
-                    "required": ["kind"],
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "always",
-                          "amount_greater_than",
-                          "amount_less_than",
-                          "partner_is",
-                          "custom_expression"
-                        ]
-                      },
-                      "amount": {
-                        "type": "string",
-                        "pattern": "^-?\\d+(\\.\\d+)?$",
-                        "description": "Decimal amount used for amount-based predicates"
-                      },
-                      "partnerId": {
-                        "type": "string",
-                        "description": "Partner identifier for partner-based predicates"
-                      },
-                      "expression": {
-                        "type": "string",
-                        "description": "Custom expression to evaluate"
-                      }
-                    }
-                  }
-                }
-              },
-              "steps": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "type": "object",
-                  "required": ["id", "name", "approverRoleIds", "minApprovals"],
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "description": {
-                      "type": "string"
-                    },
-                    "approverRoleIds": {
-                      "type": "array",
-                      "minItems": 1,
-                      "items": {
-                        "type": "string",
-                        "minLength": 1
-                      }
-                    },
-                    "minApprovals": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "description": "Minimum number of approvals required in this step"
-                    },
-                    "requiresSequentialApproval": {
-                      "type": "boolean"
-                    },
-                    "escalationRoleId": {
-                      "type": "string"
-                    },
-                    "onReject": {
-                      "type": "string",
-                      "enum": ["stop", "escalate", "continue"]
-                    }
-                  }
-                }
-              },
-              "autoApprove": {
-                "$ref": "#/properties/approval/properties/workflows/items/properties/trigger"
-              },
-              "timeoutBehaviour": {
-                "type": "object",
-                "required": ["timeoutHours", "onTimeout"],
-                "properties": {
-                  "timeoutHours": {
-                    "type": "number",
-                    "exclusiveMinimum": 0
-                  },
-                  "onTimeout": {
-                    "type": "string",
-                    "enum": ["auto_reject", "escalate", "manual_queue"]
-                  },
-                  "escalationRoleId": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
+            "$ref": "#/definitions/rootUserAuthenticatorSeed"
           }
-        }
-      }
-    },
-    "transactionLimits": {
-      "type": "object",
-      "required": ["automated"],
-      "properties": {
-        "automated": {
-          "type": "object",
-          "required": ["singleTransaction"],
-          "properties": {
-            "singleTransaction": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "description": "Maximum single transaction amount"
-            },
-            "dailyLimit": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "description": "Maximum daily aggregate amount"
-            },
-            "monthlyLimit": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "description": "Maximum monthly aggregate amount"
-            }
-          }
-        }
-      }
-    },
-    "apiSettings": {
-      "type": "object",
-      "required": ["ipWhitelist"],
-      "properties": {
-        "ipWhitelist": {
+        },
+        "oauthProviders": {
           "type": "array",
-          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/rootUserOauthProviderSeed"
+          }
+        },
+        "userTags": {
+          "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}$",
-            "description": "IP address allowed to use the API"
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "automationApiKeySeed": {
+      "allOf": [
+        { "$ref": "#/definitions/rootUserApiKeySeed" },
+        {
+          "type": "object",
+          "properties": {
+            "rotateOnCreate": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "automationAuthenticatorSeed": {
+      "allOf": [
+        { "$ref": "#/definitions/rootUserAuthenticatorSeed" },
+        {
+          "type": "object",
+          "properties": {
+            "attestationStrategy": {
+              "type": "string",
+              "enum": ["generated_at_runtime", "provided_via_config"]
+            }
+          }
+        }
+      ]
+    },
+    "automationUserTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["templateId", "userNameTemplate"],
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "userNameTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "userEmailTemplate": {
+          "type": "string"
+        },
+        "userPhoneNumberTemplate": {
+          "type": "string"
+        },
+        "apiKeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/automationApiKeySeed"
           }
         },
-        "webhookEndpoint": {
+        "authenticators": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/automationAuthenticatorSeed"
+          }
+        },
+        "oauthProviders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/rootUserOauthProviderSeed"
+          }
+        },
+        "userTags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sessionTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "walletAccountTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alias", "curve", "pathFormat", "path", "addressFormat"],
+      "properties": {
+        "alias": {
           "type": "string",
-          "format": "uri",
-          "description": "Endpoint for transaction status updates"
+          "minLength": 1
+        },
+        "curve": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pathFormat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "addressFormat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chainId": {
+          "type": "string"
+        },
+        "assetSymbol": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "walletTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["templateId", "usage", "walletNameTemplate", "accounts"],
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "usage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "walletNameTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/walletAccountTemplate"
+          }
+        },
+        "mnemonicLength": {
+          "type": "integer",
+          "enum": [12, 15, 18, 21, 24]
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "walletFlowConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["templateId"],
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "partnerConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["partnerId", "displayName", "enabled"],
+      "properties": {
+        "partnerId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "flowOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "automationUserTemplateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policyIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "webhookOverride": {
+          "$ref": "#/definitions/webhookConfig"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "rolePermissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "viewDistributions": { "type": "boolean" },
+        "viewCollections": { "type": "boolean" },
+        "initiateDisbursements": { "type": "boolean" },
+        "approveDisbursements": { "type": "boolean" },
+        "viewReports": { "type": "boolean" },
+        "manageRoles": { "type": "boolean" },
+        "configureSettings": { "type": "boolean" }
+      }
+    },
+    "userRoleDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roleId", "roleName", "description", "permissions", "turnkeyUserTagTemplate", "requiresPolicyApproval"],
+      "properties": {
+        "roleId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "roleName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "permissions": {
+          "$ref": "#/definitions/rolePermissions"
+        },
+        "turnkeyUserTagTemplate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPolicyApproval": {
+          "type": "boolean"
+        },
+        "maxUsers": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "sessionTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "defaultExpirationSeconds"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultExpirationSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "sessionConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readOnly": {
+          "$ref": "#/definitions/sessionTemplate"
+        },
+        "readWrite": {
+          "$ref": "#/definitions/sessionTemplate"
+        },
+        "automationOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/sessionTemplate"
+          }
+        }
+      }
+    },
+    "policyVariableDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "exampleValue": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["transaction", "partner", "wallet", "session", "custom"]
+        }
+      }
+    },
+    "policyConditionTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expression"],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/policyVariableDefinition"
+          }
+        }
+      }
+    },
+    "policyConsensusTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expression"],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/policyVariableDefinition"
+          }
+        }
+      }
+    },
+    "policyBindingDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "wallet_template",
+            "wallet_alias",
+            "partner",
+            "user_tag",
+            "automation_user",
+            "custom"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "policyTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["templateId", "policyName", "effect", "condition", "consensus"],
+      "properties": {
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policyName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effect": {
+          "type": "string",
+          "minLength": 1
+        },
+        "condition": {
+          "$ref": "#/definitions/policyConditionTemplate"
+        },
+        "consensus": {
+          "$ref": "#/definitions/policyConsensusTemplate"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "appliesTo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/policyBindingDefinition"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "monitoringConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "webhooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "activity": {
+              "$ref": "#/definitions/webhookConfig"
+            },
+            "policy": {
+              "$ref": "#/definitions/webhookConfig"
+            },
+            "alerts": {
+              "$ref": "#/definitions/webhookConfig"
+            }
+          }
+        },
+        "activityPolling": {
+          "$ref": "#/definitions/activityPollerConfig"
+        },
+        "logRetentionDays": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "reportingConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enableLedgerExport"],
+      "properties": {
+        "enableLedgerExport": {
+          "type": "boolean"
+        },
+        "ledgerExportFrequency": {
+          "type": "string",
+          "enum": ["daily", "weekly", "monthly"]
+        },
+        "storageBucketRef": {
+          "type": "string"
+        },
+        "additionalReports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "complianceConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amlProvider": {
+          "type": "string"
+        },
+        "travelRuleRequired": {
+          "type": "boolean"
+        },
+        "sanctionListRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "auditRequirements": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["retentionYears", "encryptionRequired"],
+          "properties": {
+            "retentionYears": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "encryptionRequired": {
+              "type": "boolean"
+            }
+          }
         }
       }
     }

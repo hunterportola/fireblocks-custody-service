@@ -1,146 +1,87 @@
-/**
- * Error handling utilities for Fireblocks SDK operations
- */
+import { TurnkeyRequestError } from '@turnkey/sdk-server';
+import type { TActivity } from '@turnkey/http';
 
-import { AxiosError } from 'axios';
-
-/**
- * Custom error class for Fireblocks operations
- */
-export class FireblocksServiceError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public statusCode?: number,
-    public details?: any
-  ) {
-    super(message);
-    this.name = 'FireblocksServiceError';
-  }
-}
-
-/**
- * Error codes for various failure scenarios
- */
 export const ErrorCodes = {
-  // Configuration errors
   INVALID_CONFIG: 'INVALID_CONFIG',
   MISSING_CREDENTIALS: 'MISSING_CREDENTIALS',
-
-  // Vault errors
-  VAULT_CREATION_FAILED: 'VAULT_CREATION_FAILED',
-  VAULT_NOT_FOUND: 'VAULT_NOT_FOUND',
-  ASSET_ACTIVATION_FAILED: 'ASSET_ACTIVATION_FAILED',
-
-  // Transaction errors
-  TRANSACTION_FAILED: 'TRANSACTION_FAILED',
-  INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
-  INVALID_DESTINATION: 'INVALID_DESTINATION',
-  DUPLICATE_TRANSACTION: 'DUPLICATE_TRANSACTION',
-
-  // Approval errors
-  APPROVAL_NOT_FOUND: 'APPROVAL_NOT_FOUND',
-  UNAUTHORIZED_APPROVER: 'UNAUTHORIZED_APPROVER',
-  ALREADY_APPROVED: 'ALREADY_APPROVED',
-
-  // API errors
+  ORGANIZATION_NOT_SET: 'ORGANIZATION_NOT_SET',
   API_ERROR: 'API_ERROR',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
   NETWORK_ERROR: 'NETWORK_ERROR',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  NOT_FOUND: 'NOT_FOUND',
+  CONSENSUS_REQUIRED: 'CONSENSUS_REQUIRED',
+  POLICY_DENIED: 'POLICY_DENIED',
+  ACTIVITY_FAILED: 'ACTIVITY_FAILED',
+  ACTIVITY_TIMEOUT: 'ACTIVITY_TIMEOUT',
 } as const;
 
-/**
- * Handle Fireblocks API errors and convert to service errors
- */
-export function handleFireblocksError(error: unknown): never {
-  if (error instanceof AxiosError) {
-    const response = error.response;
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
-    if (response) {
-      // API returned an error response
-      const status = response.status;
-      const data = response.data;
-
-      // Common Fireblocks error patterns
-      if (status === 400) {
-        if (data?.message?.includes('already exists')) {
-          throw new FireblocksServiceError(
-            'Resource already exists',
-            ErrorCodes.DUPLICATE_TRANSACTION,
-            status,
-            data
-          );
-        }
-        throw new FireblocksServiceError(
-          data?.message || 'Bad request',
-          ErrorCodes.API_ERROR,
-          status,
-          data
-        );
-      }
-
-      if (status === 401) {
-        throw new FireblocksServiceError(
-          'Authentication failed - check API credentials',
-          ErrorCodes.MISSING_CREDENTIALS,
-          status
-        );
-      }
-
-      if (status === 403) {
-        throw new FireblocksServiceError(
-          'Access forbidden - check permissions',
-          ErrorCodes.API_ERROR,
-          status,
-          data
-        );
-      }
-
-      if (status === 404) {
-        throw new FireblocksServiceError(
-          data?.message || 'Resource not found',
-          ErrorCodes.VAULT_NOT_FOUND,
-          status,
-          data
-        );
-      }
-
-      if (status === 429) {
-        throw new FireblocksServiceError(
-          'Rate limit exceeded - please retry later',
-          ErrorCodes.RATE_LIMIT_EXCEEDED,
-          status
-        );
-      }
-
-      // Generic API error
-      throw new FireblocksServiceError(
-        data?.message || `API error: ${status}`,
-        ErrorCodes.API_ERROR,
-        status,
-        data
-      );
-    }
-
-    // Network error
-    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-      throw new FireblocksServiceError(
-        'Network error - unable to reach Fireblocks API',
-        ErrorCodes.NETWORK_ERROR
-      );
-    }
+export class TurnkeyServiceError extends Error {
+  constructor(
+    message: string,
+    public code: ErrorCode,
+    public statusCode?: number,
+    public details?: unknown,
+    public context?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = 'TurnkeyServiceError';
   }
-
-  // Unknown error
-  throw new FireblocksServiceError(
-    error instanceof Error ? error.message : 'Unknown error occurred',
-    ErrorCodes.API_ERROR
-  );
 }
 
-/**
- * Retry logic for transient failures
- */
+export class ConsensusRequiredError extends TurnkeyServiceError {
+  constructor(
+    message: string,
+    public readonly activityId?: string,
+    public readonly activityStatus?: string,
+    public readonly activityType?: string,
+    public readonly requiredApprovals?: number,
+    public readonly currentApprovals?: number,
+    context?: Record<string, unknown>
+  ) {
+    super(message, ErrorCodes.CONSENSUS_REQUIRED, undefined, undefined, context);
+  }
+}
+
+export class PolicyDeniedError extends TurnkeyServiceError {
+  constructor(
+    message: string,
+    public readonly policyIds: string[],
+    statusCode?: number,
+    details?: unknown,
+    context?: Record<string, unknown>
+  ) {
+    super(message, ErrorCodes.POLICY_DENIED, statusCode, details, context);
+  }
+}
+
+export class ActivityFailedError extends TurnkeyServiceError {
+  constructor(message: string, public readonly activity: TActivity, context?: Record<string, unknown>) {
+    super(message, ErrorCodes.ACTIVITY_FAILED, undefined, activity, context);
+  }
+}
+
+export function toTurnkeyServiceError(
+  error: unknown,
+  context?: Record<string, unknown>
+): TurnkeyServiceError {
+  if (error instanceof TurnkeyServiceError) {
+    return error;
+  }
+
+  if (isTurnkeyRequestError(error)) {
+    return mapTurnkeyRequestError(error, context);
+  }
+
+  if (error instanceof Error) {
+    return new TurnkeyServiceError(error.message, ErrorCodes.API_ERROR, undefined, undefined, context);
+  }
+
+  return new TurnkeyServiceError('Unknown error occurred', ErrorCodes.API_ERROR, undefined, undefined, context);
+}
+
 export async function retryWithBackoff<T>(
   operation: () => Promise<T>,
   maxRetries: number = 3,
@@ -154,21 +95,11 @@ export async function retryWithBackoff<T>(
     } catch (error) {
       lastError = error;
 
-      // Don't retry certain errors
-      if (error instanceof FireblocksServiceError) {
-        const nonRetryableCodes = [
-          ErrorCodes.INVALID_CONFIG,
-          ErrorCodes.MISSING_CREDENTIALS,
-          ErrorCodes.DUPLICATE_TRANSACTION,
-          ErrorCodes.UNAUTHORIZED_APPROVER,
-        ];
-
-        if (nonRetryableCodes.includes(error.code as any)) {
-          throw error;
-        }
+      const serviceError = toTurnkeyServiceError(error);
+      if (serviceError.code === ErrorCodes.INVALID_CONFIG || serviceError.code === ErrorCodes.MISSING_CREDENTIALS) {
+        throw serviceError;
       }
 
-      // Wait before retrying (exponential backoff)
       if (attempt < maxRetries - 1) {
         const delay = initialDelay * Math.pow(2, attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -176,6 +107,116 @@ export async function retryWithBackoff<T>(
     }
   }
 
-  // All retries failed
-  throw lastError;
+  throw toTurnkeyServiceError(lastError);
+}
+
+export function buildTurnkeyRequestError(
+  error: unknown,
+  context?: Record<string, unknown>
+): TurnkeyServiceError {
+  if (isTurnkeyRequestError(error)) {
+    return mapTurnkeyRequestError(error, context);
+  }
+  return toTurnkeyServiceError(error, context);
+}
+
+export function buildPolicyDeniedError(
+  error: unknown,
+  context?: Record<string, unknown>
+): PolicyDeniedError | undefined {
+  if (!isTurnkeyRequestError(error)) {
+    return undefined;
+  }
+
+  if (error.code !== 403) {
+    return undefined;
+  }
+
+  const message = error.message || 'Policy denied';
+  const policyIds = extractPolicyIds(error.details as PolicyDetail[] | null);
+  return new PolicyDeniedError(message, policyIds, error.code, error.details, context);
+}
+
+export function buildActivityFailedError(
+  activity: TActivity,
+  message: string = 'Turnkey activity failed',
+  context?: Record<string, unknown>
+): ActivityFailedError {
+  return new ActivityFailedError(message, activity, context);
+}
+
+function mapTurnkeyRequestError(
+  error: TurnkeyRequestError,
+  context?: Record<string, unknown>
+): TurnkeyServiceError {
+  const message = error.message || 'Turnkey request failed';
+
+  switch (error.code) {
+    case 401:
+      return new TurnkeyServiceError(message, ErrorCodes.MISSING_CREDENTIALS, error.code, error.details, context);
+    case 403: {
+      const policyError = buildPolicyDeniedError(error, context);
+      return policyError ?? new TurnkeyServiceError(message, ErrorCodes.UNAUTHORIZED, error.code, error.details, context);
+    }
+    case 404:
+      return new TurnkeyServiceError(message, ErrorCodes.NOT_FOUND, error.code, error.details, context);
+    case 429:
+      return new TurnkeyServiceError(message, ErrorCodes.RATE_LIMIT_EXCEEDED, error.code, error.details, context);
+    default:
+      return new TurnkeyServiceError(message, ErrorCodes.API_ERROR, error.code, error.details, context);
+  }
+}
+
+function isTurnkeyRequestError(error: unknown): error is TurnkeyRequestError {
+  return typeof TurnkeyRequestError === 'function' && error instanceof TurnkeyRequestError;
+}
+
+/**
+ * Interface for policy evaluation details from Turnkey API responses
+ */
+interface PolicyEvaluation {
+  policyId?: string;
+  id?: string;
+}
+
+/**
+ * Interface for policy-related error details from Turnkey API responses
+ */
+interface PolicyDetail {
+  policyEvaluations?: PolicyEvaluation[];
+  policyEvaluation?: PolicyEvaluation[];
+  policyId?: string;
+  id?: string;
+}
+
+function extractPolicyIds(details: PolicyDetail[] | null): string[] {
+  if (!Array.isArray(details)) {
+    return [];
+  }
+
+  const policyIds = new Set<string>();
+  details.forEach((detail) => {
+    if (detail == null) {
+      return;
+    }
+
+    const maybeEvaluations = detail.policyEvaluations ?? detail.policyEvaluation;
+
+    if (Array.isArray(maybeEvaluations)) {
+      maybeEvaluations.forEach((evaluation) => {
+        const policyId = evaluation.policyId ?? evaluation.id;
+        if (typeof policyId === 'string') {
+          policyIds.add(policyId);
+        }
+      });
+      return;
+    }
+
+    const policyId = detail.policyId ?? detail.id;
+    if (typeof policyId === 'string') {
+      policyIds.add(policyId);
+    }
+  });
+
+  return Array.from(policyIds);
 }

@@ -1,205 +1,278 @@
-import type { RoleDefinition } from '../config/types';
+import type { PartnerId, TemplateString } from '../config/types';
+import { isNonEmptyString, isRecord } from '../utils/type-guards';
 import type {
-  ApprovalConditionDefinition,
-  ApprovalPredicate,
-  ApprovalStepDefinition,
-  ApprovalWorkflowDefinition,
+  PolicyBindingDefinition,
+  PolicyConditionTemplate,
+  PolicyConsensusTemplate,
+  PolicyVariableDefinition,
 } from './types';
-import {
-  isDecimalString,
-  isNonEmptyString,
-  isNonNegativeInteger,
-  isPositiveNumber,
-} from '../utils/type-guards';
 
-const SUPPORTED_TIMEOUT_ACTIONS = new Set(['auto_reject', 'escalate', 'manual_queue']);
-
-function validatePredicate(predicate: ApprovalPredicate, path: string, errors: string[]): void {
-  switch (predicate.kind) {
-    case 'always':
-      return;
-    case 'amount_greater_than':
-    case 'amount_less_than':
-      if (!isDecimalString(predicate.amount)) {
-        errors.push(`${path}: predicate amount must be a valid decimal string`);
-      }
-      return;
-    case 'partner_is':
-      if (!isNonEmptyString(predicate.partnerId)) {
-        errors.push(`${path}: partnerId must be a non-empty string`);
-      }
-      return;
-    case 'custom_expression':
-      if (!isNonEmptyString(predicate.expression)) {
-        errors.push(`${path}: custom expression must be a non-empty string`);
-      }
-      return;
-    default:
-      errors.push(`${path}: unsupported predicate kind ${(predicate as { kind?: string }).kind ?? 'unknown'}`);
-  }
+export interface PolicyValidationContext {
+  walletTemplateIds: ReadonlyArray<string>;
+  walletAliases: ReadonlyArray<string>;
+  partnerIds: ReadonlyArray<PartnerId>;
+  userTagTemplates?: ReadonlyArray<TemplateString>;
+  automationUserTemplateIds?: ReadonlyArray<string>;
 }
 
-function validateCondition(
-  condition: ApprovalConditionDefinition,
-  path: string,
-  errors: string[]
-): void {
-  if (!isNonEmptyString(condition.id)) {
-    errors.push(`${path}: id is required`);
-  }
-
-  if (condition.description !== undefined && !isNonEmptyString(condition.description)) {
-    errors.push(`${path}: description must be a non-empty string when provided`);
-  }
-
-  if (!condition.predicate) {
-    errors.push(`${path}: predicate is required`);
-    return;
-  }
-
-  validatePredicate(condition.predicate, `${path}.predicate`, errors);
-}
-
-function validateStep(
-  step: ApprovalStepDefinition,
-  roleIds: Set<RoleDefinition['roleId']>,
-  path: string,
-  errors: string[],
-  warnings: string[]
-): void {
-  if (!isNonEmptyString(step.id)) {
-    errors.push(`${path}: id is required`);
-  }
-
-  if (!isNonEmptyString(step.name)) {
-    errors.push(`${path}: name is required`);
-  }
-
-  if (!Array.isArray(step.approverRoleIds) || step.approverRoleIds.length === 0) {
-    errors.push(`${path}: approverRoleIds must contain at least one role`);
-  } else {
-    step.approverRoleIds.forEach((roleId, idx) => {
-      if (!isNonEmptyString(roleId)) {
-        errors.push(`${path}.approverRoleIds[${idx}]: roleId must be a non-empty string`);
-      } else if (!roleIds.has(roleId)) {
-        errors.push(`${path}.approverRoleIds[${idx}]: roleId "${roleId}" is not defined in roleDefinitions`);
-      }
-    });
-  }
-
-  if (!isNonNegativeInteger(step.minApprovals) || step.minApprovals <= 0) {
-    errors.push(`${path}: minApprovals must be a positive integer`);
-  } else if (Array.isArray(step.approverRoleIds) && step.minApprovals > step.approverRoleIds.length) {
-    errors.push(`${path}: minApprovals cannot exceed the number of approverRoleIds`);
-  }
-
-  if (step.escalationRoleId && !roleIds.has(step.escalationRoleId)) {
-    errors.push(`${path}: escalationRoleId "${step.escalationRoleId}" is not defined in roleDefinitions`);
-  }
-
-  if (step.onReject && !['stop', 'escalate', 'continue'].includes(step.onReject)) {
-    errors.push(`${path}: onReject must be one of "stop", "escalate", or "continue"`);
-  }
-
-  if (step.requiresSequentialApproval && step.minApprovals !== step.approverRoleIds.length) {
-    warnings.push(
-      `${path}: requiresSequentialApproval is true but minApprovals is less than approverRoleIds length`
-    );
-  }
-}
-
-function validateTimeoutBehaviour(
-  workflowName: string,
-  timeout: ApprovalWorkflowDefinition['timeoutBehaviour'],
-  roleIds: Set<RoleDefinition['roleId']>,
-  errors: string[]
-): void {
-  if (!timeout) {
-    return;
-  }
-
-  if (!isPositiveNumber(timeout.timeoutHours)) {
-    errors.push(`workflow "${workflowName}": timeoutHours must be a positive number`);
-  }
-
-  if (!SUPPORTED_TIMEOUT_ACTIONS.has(timeout.onTimeout)) {
-    errors.push(
-      `workflow "${workflowName}": onTimeout must be one of ${Array.from(SUPPORTED_TIMEOUT_ACTIONS).join(', ')}`
-    );
-  }
-
-  if (timeout.escalationRoleId && !roleIds.has(timeout.escalationRoleId)) {
-    errors.push(
-      `workflow "${workflowName}": escalationRoleId "${timeout.escalationRoleId}" is not defined in roleDefinitions`
-    );
-  }
-}
-
-export interface ApprovalValidationResult {
+export interface PolicyValidationResult {
   errors: string[];
   warnings: string[];
 }
 
-export function validateApprovalWorkflows(
-  workflows: ReadonlyArray<ApprovalWorkflowDefinition>,
-  roleDefinitions: ReadonlyArray<RoleDefinition>
-): ApprovalValidationResult {
+function validateVariables(
+  variables: ReadonlyArray<PolicyVariableDefinition> | undefined,
+  path: string,
+  errors: string[]
+): void {
+  if (variables === undefined) {
+    return;
+  }
+
+  const seenKeys = new Set<string>();
+
+  variables.forEach((variable, index) => {
+    const variablePath = `${path}.variables[${index}]`;
+    if (variable === null || typeof variable !== 'object') {
+      errors.push(`${variablePath}: variable must be an object`);
+      return;
+    }
+
+    if (!isNonEmptyString(variable.key)) {
+      errors.push(`${variablePath}: key is required`);
+    } else if (seenKeys.has(variable.key)) {
+      errors.push(`${variablePath}: duplicate variable key "${variable.key}"`);
+    } else {
+      seenKeys.add(variable.key);
+    }
+
+    if (variable.description !== undefined && !isNonEmptyString(variable.description)) {
+      errors.push(`${variablePath}: description must be a non-empty string when provided`);
+    }
+
+    if (variable.exampleValue !== undefined && !isNonEmptyString(variable.exampleValue)) {
+      errors.push(`${variablePath}: exampleValue must be a non-empty string when provided`);
+    }
+
+    if (
+      variable.source !== undefined &&
+      !['transaction', 'partner', 'wallet', 'session', 'custom'].includes(variable.source)
+    ) {
+      errors.push(`${variablePath}: unsupported source "${variable.source}"`);
+    }
+  });
+}
+
+function validateExpressionTemplate(
+  template: PolicyConditionTemplate | PolicyConsensusTemplate | undefined,
+  path: string,
+  errors: string[]
+): void {
+  if (template === null || typeof template !== 'object') {
+    errors.push(`${path}: template must be an object`);
+    return;
+  }
+
+  if (!isNonEmptyString(template.expression)) {
+    errors.push(`${path}: expression is required`);
+  }
+
+  if (template.description !== undefined && !isNonEmptyString(template.description)) {
+    errors.push(`${path}: description must be a non-empty string when provided`);
+  }
+
+  validateVariables(template.variables, path, errors);
+}
+
+function validateBinding(
+  binding: PolicyBindingDefinition,
+  index: number,
+  context: PolicyValidationContext,
+  path: string,
+  errors: string[]
+): void {
+  const bindingPath = `${path}[${index}]`;
+
+  if (binding === null || typeof binding !== 'object') {
+    errors.push(`${bindingPath}: binding must be an object`);
+    return;
+  }
+
+  if (!isNonEmptyString(binding.type)) {
+    errors.push(`${bindingPath}: type is required`);
+    return;
+  }
+
+  const { target } = binding;
+  if (!isNonEmptyString(target)) {
+    errors.push(`${bindingPath}: target is required`);
+    return;
+  }
+
+  if (binding.description !== undefined && !isNonEmptyString(binding.description)) {
+    errors.push(`${bindingPath}: description must be a non-empty string when provided`);
+  }
+
+  switch (binding.type) {
+    case 'wallet_template':
+      if (!context.walletTemplateIds.includes(target)) {
+        errors.push(`${bindingPath}: wallet template "${target}" is not defined`);
+      }
+      break;
+    case 'wallet_alias':
+      if (!context.walletAliases.includes(target)) {
+        errors.push(`${bindingPath}: wallet alias "${target}" is not defined`);
+      }
+      break;
+    case 'partner':
+      if (!context.partnerIds.includes(target)) {
+        errors.push(`${bindingPath}: partner "${target}" is not defined`);
+      }
+      break;
+    case 'user_tag':
+      if (context.userTagTemplates !== undefined && !context.userTagTemplates.includes(target)) {
+        errors.push(`${bindingPath}: user tag template "${target}" is not defined`);
+      }
+      break;
+    case 'automation_user':
+      if (context.automationUserTemplateIds !== undefined && !context.automationUserTemplateIds.includes(target)) {
+        errors.push(`${bindingPath}: automation user "${target}" is not defined`);
+      }
+      break;
+    case 'custom':
+      break;
+    default:
+      errors.push(`${bindingPath}: unsupported binding type "${String(binding.type)}"`);
+  }
+}
+
+/**
+ * Helper function to safely get a property from an unknown object
+ */
+function safeGetProperty(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) {
+    return undefined;
+  }
+  return Object.prototype.hasOwnProperty.call(obj, key) ? 
+    Object.getOwnPropertyDescriptor(obj, key)?.value : undefined;
+}
+
+/**
+ * Interface for validating potentially unsafe policy template data
+ */
+interface UnvalidatedPolicyTemplate {
+  templateId?: unknown;
+  policyName?: unknown;
+  effect?: unknown;
+  condition?: unknown;
+  consensus?: unknown;
+  notes?: unknown;
+  appliesTo?: unknown;
+  metadata?: unknown;
+  tags?: unknown;
+}
+
+export function validatePolicyTemplates(
+  templates: ReadonlyArray<UnvalidatedPolicyTemplate>,
+  context: PolicyValidationContext
+): PolicyValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!Array.isArray(workflows)) {
+  if (!Array.isArray(templates)) {
     return {
-      errors: ['Approval configuration must contain an array of workflows'],
+      errors: ['Policy configuration must contain an array of templates'],
       warnings,
     };
   }
 
-  const roleIds = new Set(roleDefinitions.map((role) => role.roleId));
-  const workflowIds = new Set<string>();
+  const templateIds = new Set<string>();
+  const policyNames = new Set<string>();
 
-  workflows.forEach((workflow, workflowIndex) => {
-    const path = `approval.workflows[${workflowIndex}]`;
+  templates.forEach((template, index) => {
+    const path = `policies.templates[${index}]`;
 
-    if (!workflow || typeof workflow !== 'object') {
-      errors.push(`${path}: workflow must be an object`);
+    if (template === null || typeof template !== 'object') {
+      errors.push(`${path}: template must be an object`);
       return;
     }
 
-    if (!isNonEmptyString(workflow.workflowId)) {
-      errors.push(`${path}: workflowId is required`);
-    } else if (workflowIds.has(workflow.workflowId)) {
-      errors.push(`${path}: workflowId "${workflow.workflowId}" must be unique`);
+    // Validate templateId
+    const templateId = safeGetProperty(template, 'templateId');
+    if (!isNonEmptyString(templateId)) {
+      errors.push(`${path}: templateId is required`);
     } else {
-      workflowIds.add(workflow.workflowId);
+      const templateIdStr = String(templateId);
+      if (templateIds.has(templateIdStr)) {
+        errors.push(`${path}: templateId "${templateIdStr}" must be unique`);
+      } else {
+        templateIds.add(templateIdStr);
+      }
     }
 
-    if (!isNonEmptyString(workflow.name)) {
-      errors.push(`${path}: name is required`);
-    }
-
-    if (workflow.description !== undefined && !isNonEmptyString(workflow.description)) {
-      errors.push(`${path}: description must be a non-empty string when provided`);
-    }
-
-    if (!workflow.trigger) {
-      errors.push(`${path}: trigger condition is required`);
+    // Validate policyName
+    const policyName = safeGetProperty(template, 'policyName');
+    if (!isNonEmptyString(policyName)) {
+      errors.push(`${path}: policyName is required`);
     } else {
-      validateCondition(workflow.trigger, `${path}.trigger`, errors);
+      const policyNameStr = String(policyName);
+      if (policyNames.has(policyNameStr)) {
+        warnings.push(`${path}: duplicate policy name "${policyNameStr}" detected`);
+      } else {
+        policyNames.add(policyNameStr);
+      }
     }
 
-    if (!Array.isArray(workflow.steps) || workflow.steps.length === 0) {
-      errors.push(`${path}: at least one approval step is required`);
+    // Validate effect
+    const effect = safeGetProperty(template, 'effect');
+    if (!isNonEmptyString(effect)) {
+      errors.push(`${path}: effect is required`);
     } else {
-      workflow.steps.forEach((step: ApprovalStepDefinition, stepIndex: number) => {
-        validateStep(step, roleIds, `${path}.steps[${stepIndex}]`, errors, warnings);
-      });
+      const effectStr = String(effect);
+      if (effectStr !== 'EFFECT_ALLOW' && effectStr !== 'EFFECT_DENY') {
+        errors.push(`${path}: effect must be either "EFFECT_ALLOW" or "EFFECT_DENY"`);
+      }
     }
 
-    if (workflow.autoApprove) {
-      validateCondition(workflow.autoApprove, `${path}.autoApprove`, errors);
+    // Validate condition and consensus 
+    const condition = safeGetProperty(template, 'condition');
+    const consensus = safeGetProperty(template, 'consensus');
+    validateExpressionTemplate(condition as PolicyConditionTemplate | undefined, `${path}.condition`, errors);
+    validateExpressionTemplate(consensus as PolicyConsensusTemplate | undefined, `${path}.consensus`, errors);
+
+    // Validate notes
+    const notes = safeGetProperty(template, 'notes');
+    if (notes !== undefined && !isNonEmptyString(notes)) {
+      errors.push(`${path}: notes must be a non-empty string when provided`);
     }
 
-    validateTimeoutBehaviour(workflow.name ?? workflow.workflowId, workflow.timeoutBehaviour, roleIds, errors);
+    // Validate tags
+    const tags = safeGetProperty(template, 'tags');
+    if (tags !== undefined) {
+      if (!Array.isArray(tags)) {
+        errors.push(`${path}: tags must be an array when provided`);
+      } else {
+        const tagsArray = tags as unknown[];
+        tagsArray.forEach((tag: unknown, tagIndex: number) => {
+          if (!isNonEmptyString(tag)) {
+            errors.push(`${path}.tags[${tagIndex}]: tag must be a non-empty string`);
+          }
+        });
+      }
+    }
+
+    // Validate appliesTo
+    const appliesTo = safeGetProperty(template, 'appliesTo');
+    if (appliesTo !== undefined) {
+      if (!Array.isArray(appliesTo)) {
+        errors.push(`${path}: appliesTo must be an array when provided`);
+      } else {
+        const appliesToArray = appliesTo as unknown[];
+        appliesToArray.forEach((binding: unknown, bindingIndex: number) =>
+          validateBinding(binding as PolicyBindingDefinition, bindingIndex, context, `${path}.appliesTo`, errors)
+        );
+      }
+    }
   });
 
   return { errors, warnings };

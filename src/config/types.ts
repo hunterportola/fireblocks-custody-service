@@ -1,93 +1,151 @@
-import type { ApprovalWorkflowDefinition } from '../approvals/types';
+import type { definitions as TurnkeyDefinitions } from '@turnkey/http/dist/__generated__/services/coordinator/public/v1/public_api.types';
+import type { SessionType } from '@turnkey/sdk-types';
 
-export const WORKSPACE_ENVIRONMENTS = ['sandbox', 'testnet', 'mainnet'] as const;
-export type WorkspaceEnvironment = (typeof WORKSPACE_ENVIRONMENTS)[number];
+import type { PolicyTemplate } from '../approvals/types';
 
+type TurnkeyDefs = TurnkeyDefinitions;
+
+export const TURNKEY_ENVIRONMENTS = ['sandbox', 'staging', 'production'] as const;
+export type TurnkeyEnvironment = (typeof TURNKEY_ENVIRONMENTS)[number];
+
+// Shared primitives used across the configuration model
+export type DecimalString = string;
+export type IsoDateString = string;
 export type PartnerId = string;
 export type UserId = string;
+export type TemplateString = string;
 
-export type DecimalString = string;
+// Turnkey enums surfaced in the config surface
+export type TurnkeyCurve = TurnkeyDefs['v1Curve'];
+export type TurnkeyPathFormat = TurnkeyDefs['v1PathFormat'];
+export type TurnkeyAddressFormat = TurnkeyDefs['v1AddressFormat'];
+export type TurnkeyFeatureName = TurnkeyDefs['v1FeatureName'];
+export type TurnkeyEffect = TurnkeyDefs['v1Effect'];
+export type TurnkeyApiKeyCurve = TurnkeyDefs['v1ApiKeyCurve'];
 
-export type IsoDateString = string;
-
-export interface WorkspaceConfig {
-  name: string;
-  environment: WorkspaceEnvironment;
+// -----------------------------------------------------------------------------
+// Activity polling
+// -----------------------------------------------------------------------------
+export interface ActivityPollerConfig {
+  intervalMs: number;
+  numRetries: number;
 }
 
-export interface LendingPartner {
-  id: PartnerId; 
-  name: string; 
-  enabled: boolean; 
-  
-  config?: {
-    customApprovalThreshold?: number; 
-    allowedAssets?: SupportedAsset[]; 
-    webhookUrl?: string; 
-  };
+// -----------------------------------------------------------------------------
+// Platform & originator identity (Step 1 - "Who am I and where do I operate?")
+// -----------------------------------------------------------------------------
+export interface OriginatorProfile {
+  originatorId: string;
+  displayName: string;
+  legalEntityName?: string;
+  metadata?: Record<string, string>;
 }
 
-export interface LendingPartnersConfig {
-  partners: ReadonlyArray<LendingPartner>;
+export interface PlatformConfig {
+  environment: TurnkeyEnvironment;
+  organizationId: string;
+  apiBaseUrl?: string;
+  activityPoller?: ActivityPollerConfig;
+  originator: OriginatorProfile;
 }
 
-export interface VaultNamingConvention {
-  prefix: string;
-  distributionSuffix: string;
-  collectionSuffix: string;
+// -----------------------------------------------------------------------------
+// Shared configuration blocks
+// -----------------------------------------------------------------------------
+export interface OrganizationFeatureConfig {
+  name: TurnkeyFeatureName;
+  enabled: boolean;
+  value?: string;
+  description?: string;
 }
 
-export type SupportedAsset =
-  | 'USDC_ETH'
-  | 'USDC_POLYGON'
-  | 'USDC_ETH5'
-  | (string & {});
-
-export interface VaultStructureConfig {
-  namingConvention: VaultNamingConvention;
-  defaultAsset: SupportedAsset;
-  
-  
-  vaultDefaults?: {
-    autoFuel?: boolean; 
-    hiddenOnUI?: boolean; 
-  };
+export interface WebhookConfig {
+  urlTemplate: TemplateString;
+  description?: string;
+  authHeaderName?: string;
+  authSecretRef?: string;
 }
 
-export interface TransactionAutomationLimits {
-  singleTransaction: number;
-  dailyLimit?: number;
-  monthlyLimit?: number;
+export interface RootUserApiKeySeed {
+  apiKeyNameTemplate: TemplateString;
+  curveType: TurnkeyApiKeyCurve;
+  publicKeyRef?: string;
+  expirationSeconds?: number;
+  metadata?: Record<string, string>;
 }
 
-export interface TransactionLimitsConfig {
-  automated: TransactionAutomationLimits;
+export interface RootUserAuthenticatorSeed {
+  authenticatorNameTemplate: TemplateString;
+  attestationRef?: string;
+  enrollmentStrategy?: 'webauthn_passkey' | 'otp_email' | 'otp_sms' | 'manual';
+  metadata?: Record<string, string>;
 }
 
-export interface ApiSettingsConfig {
-  ipWhitelist: ReadonlyArray<string>;
-  webhookEndpoint?: string;
+export interface RootUserOauthProviderSeed {
+  providerName: string;
+  oidcTokenRef: string;
 }
 
-export interface BorrowerInfo {
-  borrowerId: string;
-  name: string;
-  email?: string;
-  [key: string]: unknown;
+export interface RootUserTemplate {
+  templateId: string;
+  userNameTemplate: TemplateString;
+  userEmailTemplate?: TemplateString;
+  userPhoneNumberTemplate?: TemplateString;
+  apiKeys?: ReadonlyArray<RootUserApiKeySeed>;
+  authenticators?: ReadonlyArray<RootUserAuthenticatorSeed>;
+  oauthProviders?: ReadonlyArray<RootUserOauthProviderSeed>;
+  userTags?: ReadonlyArray<TemplateString>;
 }
 
-export interface LoanTerms {
-  startDate: string;
-  maturityDate: string;
-  interestRateBps: number;
-  paymentFrequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'ANNUALLY';
-  [key: string]: unknown;
+export interface AutomationApiKeySeed extends RootUserApiKeySeed {
+  rotateOnCreate?: boolean;
 }
 
-export interface DisbursementMetadata {
-  borrowerInfo?: BorrowerInfo;
-  loanTerms?: LoanTerms;
-  [key: string]: unknown;
+export interface AutomationAuthenticatorSeed extends RootUserAuthenticatorSeed {
+  attestationStrategy?: 'generated_at_runtime' | 'provided_via_config';
+}
+
+export interface AutomationUserTemplate {
+  templateId: string;
+  userNameTemplate: TemplateString;
+  userEmailTemplate?: TemplateString;
+  userPhoneNumberTemplate?: TemplateString;
+  apiKeys?: ReadonlyArray<AutomationApiKeySeed>;
+  authenticators?: ReadonlyArray<AutomationAuthenticatorSeed>;
+  oauthProviders?: ReadonlyArray<RootUserOauthProviderSeed>;
+  userTags?: ReadonlyArray<TemplateString>;
+  sessionTypes?: ReadonlyArray<SessionType>;
+  description?: string;
+}
+
+export const WELL_KNOWN_WALLET_USAGES = ['distribution', 'collection', 'escrow', 'operational', 'reserve'] as const;
+
+export type WalletUsage = string;
+
+export interface WalletAccountTemplate
+  extends Pick<TurnkeyDefs['v1WalletAccountParams'], 'curve' | 'pathFormat' | 'path' | 'addressFormat'> {
+  alias: string;
+  chainId?: string;
+  assetSymbol?: string;
+  notes?: string;
+}
+
+export interface WalletTemplate extends Pick<TurnkeyDefs['v1WalletParams'], 'mnemonicLength'> {
+  templateId: string;
+  usage: WalletUsage;
+  walletNameTemplate: TemplateString;
+  accounts: ReadonlyArray<WalletAccountTemplate>;
+  description?: string;
+  tags?: ReadonlyArray<string>;
+}
+
+export const WELL_KNOWN_WALLET_FLOW_IDS = ['distribution', 'collection', 'reserve', 'operational'] as const;
+
+export type WalletFlowId = string;
+
+export interface WalletFlowConfig {
+  templateId: string;
+  description?: string;
 }
 
 export interface RolePermissions {
@@ -100,190 +158,128 @@ export interface RolePermissions {
   configureSettings?: boolean;
 }
 
-export interface RoleDefinition {
+export interface UserRoleDefinition {
   roleId: string;
   roleName: string;
   description: string;
   permissions: RolePermissions;
-  requiresApproval: boolean;
+  turnkeyUserTagTemplate: TemplateString;
+  requiresPolicyApproval: boolean;
   maxUsers?: number;
 }
 
-export interface ApprovalConfiguration {
-  workflows: ReadonlyArray<ApprovalWorkflowDefinition>;
+export interface SessionTemplate {
+  type: SessionType;
+  defaultExpirationSeconds: number;
+  notes?: string;
 }
 
-export interface OriginatorConfiguration {
-  workspace: WorkspaceConfig;
-  lendingPartners: LendingPartnersConfig;
-  vaultStructure: VaultStructureConfig;
-  approval: ApprovalConfiguration;
-  transactionLimits: TransactionLimitsConfig;
-  apiSettings: ApiSettingsConfig;
-  roleDefinitions?: RoleDefinition[];
+export interface SessionConfiguration {
+  readOnly?: SessionTemplate;
+  readWrite?: SessionTemplate;
+  automationOverrides?: Record<string, SessionTemplate>;
 }
 
-export interface PortolaWorkspace {
-  
-  workspace: WorkspaceConfig;
-  fireblocksWorkspaceId: string; 
-  
-  
-  partners: {
-    total: number; 
-    active: number; 
-    vaultPairs: Readonly<Record<PartnerId, LendingPartnerVaults>>; 
-  };
-  
-  
-  stats: {
-    totalVaultAccounts: number; 
-    totalDisbursedAllTime: DecimalString; 
-    totalCollectedAllTime: DecimalString; 
-    lastUpdated: IsoDateString;
-  };
-  
-  
-  globalSettings: {
-    defaultWorkflowId?: string;
-    defaultTransactionLimits: TransactionAutomationLimits;
-    masterWebhookUrl?: string; 
+export interface ReportingConfig {
+  enableLedgerExport: boolean;
+  ledgerExportFrequency?: 'daily' | 'weekly' | 'monthly';
+  storageBucketRef?: string;
+  additionalReports?: ReadonlyArray<string>;
+}
+
+export interface ComplianceConfig {
+  amlProvider?: string;
+  travelRuleRequired?: boolean;
+  sanctionListRefs?: ReadonlyArray<string>;
+  auditRequirements?: {
+    retentionYears: number;
+    encryptionRequired: boolean;
   };
 }
 
-export interface UserInfo {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phoneNumber?: string;
-}
-
-export interface RoleRequest {
-  requestedRoleId: string;
-  justification: string;
-  department: string;
-  managerId?: string;
-}
-
-export interface UserAccessRequest {
-  userInfo: UserInfo;
-  roleRequest: RoleRequest;
-  metadata: {
-    requestId: string;
-    timestamp: string;
-    status: 'pending' | 'approved' | 'rejected';
-    adminNotes?: string;
+export interface MonitoringConfig {
+  webhooks?: {
+    activity?: WebhookConfig;
+    policy?: WebhookConfig;
+    alerts?: WebhookConfig;
   };
+  activityPolling?: ActivityPollerConfig;
+  logRetentionDays?: number;
 }
 
-export interface UserWithRole {
-  userId: UserId;
-  userInfo: UserInfo;
-  assignedRoleId: string;
-  department: string;
-  managerId?: string;
-  assignedAt: IsoDateString;
-  assignedBy: UserId;
-  expiresAt?: IsoDateString;
-  status: 'active' | 'suspended' | 'revoked';
+// -----------------------------------------------------------------------------
+// Step 2 - Provisioning inputs (createSubOrganization payload)
+// -----------------------------------------------------------------------------
+export interface ProvisioningConfig {
+  nameTemplate: TemplateString;
+  rootQuorumThreshold: number;
+  rootUsers: ReadonlyArray<RootUserTemplate>;
+  featureToggles?: ReadonlyArray<OrganizationFeatureConfig>;
+  provisioningWebhook?: WebhookConfig;
+  defaultAutomationTemplateId?: string;
 }
 
-export interface VaultAccount {
-  id: string; 
-  name: string; 
-  assetId: string; 
+// -----------------------------------------------------------------------------
+// Step 3 - Business model: partners + wallet architecture
+// -----------------------------------------------------------------------------
+export interface WalletArchitecture {
+  templates: ReadonlyArray<WalletTemplate>;
+  flows: Record<WalletFlowId, WalletFlowConfig>;
 }
 
-export interface PartnerTransactionPolicy {
-  
-  tapRuleIds: ReadonlyArray<string>;
-  
-  pendingDraftRuleId?: string;
-  
-  lastSyncedAt: IsoDateString;
-}
-
-export interface LendingPartnerVaults {
-  partnerId: PartnerId; 
-  partnerName: string; 
-  distribution: VaultAccount; 
-  collection: VaultAccount; 
-  
-  
-  permissions: {
-    allowedUsers?: ReadonlyArray<UserId>; 
-    allowedRoles?: ReadonlyArray<RoleDefinition['roleId']>; 
-    transactionPolicy?: PartnerTransactionPolicy;
-  };
-  
-  
-  metadata: {
-    createdAt: IsoDateString; 
-    lastActivityAt?: IsoDateString; 
-    totalDisbursed?: DecimalString; 
-    totalCollected?: DecimalString; 
-    activeLoans?: number; 
-  };
-}
-
-export interface VaultPair {
-  distribution: VaultAccount;
-  collection: VaultAccount;
-}
-
-export interface DisbursementRequest {
-  loanId: string;
+export interface PartnerConfiguration {
   partnerId: PartnerId;
-  amount: string;
-  recipientWalletId: string;
-  metadata?: DisbursementMetadata;
+  displayName: string;
+  enabled: boolean;
+  flowOverrides?: Partial<Record<WalletFlowId, string>>;
+  automationUserTemplateId?: string;
+  policyIds?: ReadonlyArray<string>;
+  webhookOverride?: WebhookConfig;
+  metadata?: Record<string, string>;
 }
 
-export type DisbursementResult =
-  | {
-      status: 'executed';
-      transactionId: string;
-    }
-  | {
-      status: 'awaiting_approval';
-      pendingId: string;
-      requiredApprovals: number;
-    }
-  | {
-      status: 'failed';
-      error: string;
-      transactionId?: string;
-      pendingId?: string;
-    };
-
-export interface ApprovalRequest {
-  userId: string;
-  role: string;
-  comments?: string;
+export interface BusinessModelConfig {
+  partners: {
+    catalog: ReadonlyArray<PartnerConfiguration>;
+    defaultPolicyIds?: ReadonlyArray<string>;
+    defaultWebhookTemplate?: WebhookConfig;
+  };
+  wallets: WalletArchitecture;
 }
 
-export interface ApprovalRecord {
-  userId: string;
-  role: string;
-  approvedAt: Date;
-  comments?: string;
+// -----------------------------------------------------------------------------
+// Step 4 - Access control: roles, automation, policies
+// -----------------------------------------------------------------------------
+export interface AccessControlConfig {
+  roles: ReadonlyArray<UserRoleDefinition>;
+  automation: {
+    templates: ReadonlyArray<AutomationUserTemplate>;
+    defaultTemplateId?: string;
+    sessionConfig?: SessionConfiguration;
+  };
+  policies: {
+    templates: ReadonlyArray<PolicyTemplate>;
+    defaultPolicyIds: ReadonlyArray<string>;
+    overridePolicyIds?: ReadonlyArray<string>;
+  };
 }
 
-export interface PendingDisbursement {
-  id: string; 
-  loanId: string; 
-  partnerId: PartnerId; 
-  amount: string; 
-  recipientAddress: string; 
-  requiredApprovals: number; 
-  currentApprovals: ReadonlyArray<ApprovalRecord>; 
-  status: 'awaiting_approval' | 'approved' | 'rejected'; 
-  createdAt: IsoDateString; 
-  metadata?: DisbursementMetadata; 
+// -----------------------------------------------------------------------------
+// Step 5 - Operations overlays
+// -----------------------------------------------------------------------------
+export interface OperationsConfig {
+  monitoring?: MonitoringConfig;
+  reporting?: ReportingConfig;
 }
 
-export interface ValidationResult {
-  isValid: boolean;
-  errors: string[];
-  warnings: string[];
+// -----------------------------------------------------------------------------
+// Final configuration surface exposed to originators
+// -----------------------------------------------------------------------------
+export interface OriginatorConfiguration {
+  platform: PlatformConfig;
+  provisioning: ProvisioningConfig;
+  businessModel: BusinessModelConfig;
+  accessControl: AccessControlConfig;
+  operations?: OperationsConfig;
+  compliance?: ComplianceConfig;
 }

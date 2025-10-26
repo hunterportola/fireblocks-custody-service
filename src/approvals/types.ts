@@ -1,41 +1,47 @@
-import type { DecimalString, PartnerId, RoleDefinition } from '../config/types';
+import type { TemplateString, TurnkeyEffect } from '../config/types';
 
-export type ApprovalPredicate =
-  | { kind: 'always' }
-  | { kind: 'amount_greater_than'; amount: DecimalString }
-  | { kind: 'amount_less_than'; amount: DecimalString }
-  | { kind: 'partner_is'; partnerId: PartnerId }
-  | { kind: 'custom_expression'; expression: string };
-
-export interface ApprovalConditionDefinition {
-  id: string;
+export interface PolicyVariableDefinition {
+  key: string;
   description?: string;
-  predicate: ApprovalPredicate;
+  required?: boolean;
+  exampleValue?: string;
+  source?: 'transaction' | 'partner' | 'wallet' | 'session' | 'custom';
 }
 
-export interface ApprovalStepDefinition {
-  id: string;
-  name: string;
+export interface PolicyConditionTemplate {
+  expression: TemplateString;
   description?: string;
-  approverRoleIds: ReadonlyArray<RoleDefinition['roleId']>;
-  minApprovals: number;
-  requiresSequentialApproval?: boolean;
-  escalationRoleId?: RoleDefinition['roleId'];
-  onReject?: 'stop' | 'escalate' | 'continue';
+  variables?: ReadonlyArray<PolicyVariableDefinition>;
 }
 
-export interface ApprovalTimeoutBehaviourDefinition {
-  timeoutHours: number;
-  onTimeout: 'auto_reject' | 'escalate' | 'manual_queue';
-  escalationRoleId?: RoleDefinition['roleId'];
+export interface PolicyConsensusTemplate {
+  expression: TemplateString;
+  description?: string;
+  variables?: ReadonlyArray<PolicyVariableDefinition>;
 }
 
-export interface ApprovalWorkflowDefinition {
-  workflowId: string;
-  name: string;
+export type PolicyBindingType =
+  | 'wallet_template'
+  | 'wallet_alias'
+  | 'partner'
+  | 'user_tag'
+  | 'automation_user'
+  | 'custom';
+
+export interface PolicyBindingDefinition {
+  type: PolicyBindingType;
+  target: TemplateString;
   description?: string;
-  trigger: ApprovalConditionDefinition;
-  steps: ReadonlyArray<ApprovalStepDefinition>;
-  autoApprove?: ApprovalConditionDefinition;
-  timeoutBehaviour?: ApprovalTimeoutBehaviourDefinition;
+}
+
+export interface PolicyTemplate {
+  templateId: string;
+  policyName: string;
+  effect: TurnkeyEffect;
+  condition: PolicyConditionTemplate;
+  consensus: PolicyConsensusTemplate;
+  notes?: string;
+  appliesTo?: ReadonlyArray<PolicyBindingDefinition>;
+  metadata?: Record<string, string>;
+  tags?: ReadonlyArray<string>;
 }

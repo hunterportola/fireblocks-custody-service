@@ -1,6 +1,6 @@
-import { RoleDefinition } from '../types';
+import type { UserRoleDefinition } from '../types';
 
-export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
+export const ROLE_TEMPLATES: Record<string, UserRoleDefinition> = {
   JUNIOR_REVIEWER: {
     roleId: 'junior_reviewer',
     roleName: 'Junior Reviewer',
@@ -14,7 +14,8 @@ export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
       manageRoles: false,
       configureSettings: false,
     },
-    requiresApproval: false,
+    turnkeyUserTagTemplate: 'role:junior_reviewer',
+    requiresPolicyApproval: false,
   },
   SENIOR_REVIEWER: {
     roleId: 'senior_reviewer',
@@ -29,7 +30,8 @@ export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
       manageRoles: false,
       configureSettings: false,
     },
-    requiresApproval: true,
+    turnkeyUserTagTemplate: 'role:senior_reviewer',
+    requiresPolicyApproval: true,
   },
   COMPLIANCE_OFFICER: {
     roleId: 'compliance_officer',
@@ -44,7 +46,8 @@ export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
       manageRoles: false,
       configureSettings: false,
     },
-    requiresApproval: true,
+    turnkeyUserTagTemplate: 'role:compliance_officer',
+    requiresPolicyApproval: true,
   },
   ADMINISTRATOR: {
     roleId: 'administrator',
@@ -59,7 +62,8 @@ export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
       manageRoles: true,
       configureSettings: true,
     },
-    requiresApproval: true,
+    turnkeyUserTagTemplate: 'role:administrator',
+    requiresPolicyApproval: true,
     maxUsers: 3,
   },
   READ_ONLY_AUDITOR: {
@@ -75,6 +79,7 @@ export const ROLE_TEMPLATES: Record<string, RoleDefinition> = {
       manageRoles: false,
       configureSettings: false,
     },
-    requiresApproval: false,
+    turnkeyUserTagTemplate: 'role:read_only_auditor',
+    requiresPolicyApproval: false,
   },
 };

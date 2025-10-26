@@ -153,7 +153,7 @@ export class ConfigValidator {
       return false;
     }
 
-    const loan = payload as Record<string, unknown>;
+    const loan = payload;
 
     if (!isNonEmptyString(loan.loanId)) return false;
     if (!isNonEmptyString(loan.originatorId)) return false;
@@ -217,7 +217,7 @@ export class ConfigValidator {
       return false;
     }
 
-    const candidate = identity as Record<string, unknown>;
+    const candidate = identity;
 
     if (!isNonEmptyString(candidate.id)) return false;
     if (!isNonEmptyString(candidate.name)) return false;

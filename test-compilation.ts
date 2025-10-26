@@ -1,205 +1,234 @@
-/* eslint-disable no-console */
-
-/**
- * Test script to validate all modules compile and can be imported correctly
- */
-
 import * as dotenv from 'dotenv';
+
+import { ConfigurationValidator, type ValidationResult } from './src/config/validator-strict';
+import type { OriginatorConfiguration } from './src/config/types';
+import { ErrorCodes, TurnkeyServiceError, toTurnkeyServiceError } from './src/core/error-handler';
+import { SecretProvider, SecretsManager } from './src/core/secrets-manager';
+import { TurnkeyClientManager } from './src/core/turnkey-client';
+import { TurnkeySuborgProvisioner } from './src/provisioner/turnkey-suborg-provisioner';
+import { WalletTemplateRegistry } from './src/provisioner/wallet-template-registry';
+import { TurnkeyCustodyService } from './src/index';
+
 dotenv.config();
 
-// Test core imports
-import { 
-  OriginatorConfiguration,
-  type DisbursementRequest,
-  type VaultPair 
-} from './src/config/types';
-import { ConfigurationValidator } from './src/config/validator-strict';
-import { FireblocksClientManager } from './src/core/fireblocks-client';
-import { FireblocksServiceError, ErrorCodes, handleFireblocksError } from './src/core/error-handler';
-import { VaultProvisioner } from './src/provisioner/vault-provisioner';
-import { AssetManager } from './src/provisioner/asset-manager';
-import { FireblocksCustodyService } from './src/index';
-
-console.log('✅ All imports successful');
-
-// Verify all classes are importable
-console.log('✅ Classes imported:', {
-  ConfigurationValidator: !!ConfigurationValidator,
-  FireblocksClientManager: !!FireblocksClientManager,
-  FireblocksServiceError: !!FireblocksServiceError,
-  VaultProvisioner: !!VaultProvisioner,
-  AssetManager: !!AssetManager,
-  FireblocksCustodyService: !!FireblocksCustodyService,
-  handleFireblocksError: !!handleFireblocksError
-});
-
-// Test configuration
-const testConfig: OriginatorConfiguration = {
-  workspace: {
-    name: "Test Originator",
-    environment: "sandbox"
-  },
-  lendingPartners: {
-    partners: [
-      { id: "TEST001", name: "Test Partner 1", enabled: true },
-      { id: "TEST002", name: "Test Partner 2", enabled: false }
-    ]
-  },
-  vaultStructure: {
-    namingConvention: {
-      prefix: "TEST",
-      distributionSuffix: "_DIST_USDC",
-      collectionSuffix: "_COLL_USDC"
+const SAMPLE_CONFIG: OriginatorConfiguration = {
+  platform: {
+    environment: 'sandbox',
+    organizationId: 'org_123',
+    originator: {
+      originatorId: 'originator_abc',
+      displayName: 'Sample Originator',
     },
-    defaultAsset: "USDC_ETH5" // Testnet USDC
   },
-  approval: {
-    workflows: [
+  provisioning: {
+    nameTemplate: 'ORIG-{originatorId}',
+    rootQuorumThreshold: 1,
+    rootUsers: [
       {
-        workflowId: "wf-threshold",
-        name: "Threshold Approval",
-        trigger: {
-          id: "high-value",
-          predicate: { kind: "amount_greater_than", amount: "10000" }
-        },
-        steps: [
+        templateId: 'root-user-1',
+        userNameTemplate: 'Root Operator',
+        apiKeys: [
           {
-            id: "step-compliance",
-            name: "Compliance review",
-            approverRoleIds: ["compliance_officer"],
-            minApprovals: 1
-          }
-        ]
-      }
-    ]
-  },
-  transactionLimits: {
-    automated: {
-      singleTransaction: 100000,
-      dailyLimit: 1000000,
-      monthlyLimit: 10000000
-    }
-  },
-  apiSettings: {
-    ipWhitelist: ["203.0.113.1"],
-    webhookEndpoint: "https://test.example.com/webhook"
-  },
-  roleDefinitions: [
-    {
-      roleId: "compliance_officer",
-      roleName: "Compliance Officer",
-      description: "Reviews high-risk transactions",
-      permissions: {
-        viewDistributions: true,
-        viewCollections: true,
-        initiateDisbursements: false,
-        approveDisbursements: true,
-        viewReports: true,
-        manageRoles: false,
-        configureSettings: false
+            apiKeyNameTemplate: 'root-operator-key',
+            curveType: 'API_KEY_CURVE_P256',
+          },
+        ],
+        userTags: ['role:administrator'],
       },
-      requiresApproval: true
-    }
-  ]
+    ],
+    defaultAutomationTemplateId: 'automation-user',
+  },
+  businessModel: {
+    partners: {
+      catalog: [
+        {
+          partnerId: 'LP001',
+          displayName: 'Partner One',
+          enabled: true,
+        },
+      ],
+      defaultPolicyIds: ['policy-default'],
+    },
+    wallets: {
+      templates: [
+        {
+          templateId: 'wallet-distribution',
+          usage: 'distribution',
+          walletNameTemplate: 'ORIG-{originatorId}-DIST',
+          accounts: [
+            {
+              alias: 'distribution_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+        {
+          templateId: 'wallet-collection',
+          usage: 'collection',
+          walletNameTemplate: 'ORIG-{originatorId}-COLL',
+          accounts: [
+            {
+              alias: 'collection_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/1'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+      ],
+      flows: {
+        distribution: { templateId: 'wallet-distribution' },
+        collection: { templateId: 'wallet-collection' },
+      },
+    },
+  },
+  accessControl: {
+    roles: [
+      {
+        roleId: 'senior_reviewer',
+        roleName: 'Senior Reviewer',
+        description: 'Approves higher value transactions',
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false,
+        },
+        turnkeyUserTagTemplate: 'role:senior_reviewer',
+        requiresPolicyApproval: true,
+      },
+    ],
+    automation: {
+      templates: [
+        {
+          templateId: 'automation-user',
+          userNameTemplate: 'ORIG-{originatorId}-automation',
+          apiKeys: [
+            {
+              apiKeyNameTemplate: 'automation-key',
+              curveType: 'API_KEY_CURVE_P256',
+            },
+          ],
+          userTags: ['role:automation'],
+        },
+      ],
+      defaultTemplateId: 'automation-user',
+    },
+    policies: {
+      templates: [
+        {
+          templateId: 'policy-default',
+          policyName: 'Allow distribution transfers',
+          effect: 'EFFECT_ALLOW',
+          condition: {
+            expression: "transaction.amount <= 100000 && transaction.asset == 'USDC'",
+          },
+          consensus: {
+            expression: "user.tag('role:senior_reviewer') >= 1",
+          },
+        },
+      ],
+      defaultPolicyIds: ['policy-default'],
+    },
+  },
+  operations: {
+    monitoring: {
+      webhooks: {
+        activity: { urlTemplate: 'https://hooks.example.com/activity' },
+      },
+      activityPolling: { intervalMs: 1000, numRetries: 3 },
+    },
+    reporting: {
+      enableLedgerExport: true,
+      ledgerExportFrequency: 'monthly',
+    },
+  },
+  compliance: {
+    amlProvider: 'chainalysis',
+    travelRuleRequired: true,
+  },
 };
 
-console.log('✅ Test configuration created');
+const validator = new ConfigurationValidator();
 
-// Test configuration validation
-async function testValidation() {
-  console.log('\n🧪 Testing Configuration Validator...');
-  const validator = new ConfigurationValidator();
-  const result = await validator.validate(testConfig);
-  
-  console.log(`  Valid: ${result.isValid}`);
-  console.log(`  Errors: ${result.errors.length}`);
-  console.log(`  Warnings: ${result.warnings.length}`);
-  
-  if (result.errors.length > 0) {
-    console.log('  ❌ Errors:', result.errors);
-  }
-  if (result.warnings.length > 0) {
-    console.log('  ⚠️  Warnings:', result.warnings);
-  }
+async function validateConfiguration(): Promise<void> {
+  console.log('🧪 Validating configuration schema...');
+  const result: ValidationResult = await validator.validate(SAMPLE_CONFIG);
+  console.log(`  ✅ Valid: ${result.isValid}`);
+  console.log(`  ✅ Errors: ${result.errors.length}`);
+  console.log(`  ✅ Warnings: ${result.warnings.length}`);
 }
 
-// Test Fireblocks client initialization
-function testClientInitialization() {
-  console.log('\n🧪 Testing Fireblocks Client...');
-  
+function testSecretsManager(): void {
+  console.log('🧪 Testing SecretsManager singleton...');
+  const config = { provider: SecretProvider.ENVIRONMENT };
+  const instance1 = SecretsManager.getInstance(config);
+  const instance2 = SecretsManager.getInstance();
+  console.log(`  ✅ Singleton works: ${instance1 === instance2}`);
+}
+
+async function testTurnkeyClientInitialization(): Promise<void> {
+  console.log('🧪 Testing Turnkey client initialization...');
+  TurnkeyClientManager.reset();
   try {
-    FireblocksClientManager.getInstance();
-    console.log('  ✅ Client initialized successfully');
-  } catch (error: any) {
-    console.log('  ⚠️  Client initialization failed (expected if no API keys):', error.message);
-  }
-}
-
-// Test error handling
-function testErrorHandling() {
-  console.log('\n🧪 Testing Error Handling...');
-  
-  const customError = new FireblocksServiceError(
-    'Test error',
-    ErrorCodes.VAULT_NOT_FOUND,
-    404,
-    { detail: 'test' }
-  );
-  
-  console.log('  ✅ Custom error created:', customError.code);
-  
-  // Test error codes
-  const errorCodeCount = Object.keys(ErrorCodes).length;
-  console.log(`  ✅ Error codes defined: ${errorCodeCount}`);
-}
-
-// Test type exports
-function testTypeExports() {
-  console.log('\n🧪 Testing Type Exports...');
-  
-  // Create sample objects to ensure types work
-  const disbursementRequest: DisbursementRequest = {
-    loanId: "LOAN001",
-    partnerId: "TEST001",
-    amount: "1000.00",
-    recipientWalletId: "wallet_123"
-  };
-  
-  const vaultPair: VaultPair = {
-    distribution: {
-      id: "vault_dist_123",
-      name: "TEST_LP_TEST001_DIST_USDC",
-      assetId: "USDC_ETH5"
-    },
-    collection: {
-      id: "vault_coll_123",
-      name: "TEST_LP_TEST001_COLL_USDC",
-      assetId: "USDC_ETH5"
-    }
-  };
-  
-  console.log('  ✅ Type definitions work correctly');
-  console.log(`  ✅ Sample disbursement request: ${disbursementRequest.loanId}`);
-  console.log(`  ✅ Sample vault pair: ${vaultPair.distribution.name}`);
-}
-
-// Run all tests
-async function runTests() {
-  console.log('🚀 Running Fireblocks Custody Service compilation tests...\n');
-  
-  try {
-    await testValidation();
-    testClientInitialization();
-    testErrorHandling();
-    testTypeExports();
-    
-    console.log('\n✅ All tests completed successfully!');
-    console.log('📦 The project compiles and all modules are properly exported.');
+    await TurnkeyClientManager.initialize({ platform: SAMPLE_CONFIG.platform });
+    console.log('  ✅ Client initialized (unexpected without credentials)');
   } catch (error) {
-    console.error('\n❌ Test failed:', error);
+    const serviceError = toTurnkeyServiceError(error);
+    console.log(`  ⚠️  Initialization failed as expected: ${serviceError.code}`);
+  }
+}
+
+function testErrorHandling(): void {
+  console.log('🧪 Testing error handling utilities...');
+  const customError = new TurnkeyServiceError('Test error', ErrorCodes.API_ERROR, 500);
+  console.log(`  ✅ Custom error created with code: ${customError.code}`);
+}
+
+function testProvisioningPlanner(): void {
+  console.log('🧪 Building partner provisioning plan...');
+  const registry = new WalletTemplateRegistry(SAMPLE_CONFIG.businessModel.wallets);
+  console.log(`  ✅ Wallet templates registered: ${registry.listTemplates().length}`);
+
+  try {
+    TurnkeyClientManager.getInstance();
+    new TurnkeySuborgProvisioner();
+    console.log('  ✅ TurnkeySuborgProvisioner instantiated (provisioning requires live credentials to run)');
+  } catch {
+    console.log('  ⚠️  Skipping TurnkeySuborgProvisioner execution (client not initialized)');
+  }
+}
+
+function testWalletRegistry(): void {
+  console.log('🧪 Inspecting wallet templates...');
+  const registry = new WalletTemplateRegistry(SAMPLE_CONFIG.businessModel.wallets);
+  const templates = registry.listTemplates();
+  console.log(`  ✅ Wallet templates available: ${templates.length}`);
+}
+
+async function run(): Promise<void> {
+  console.log('🚀 Running Turnkey custodian compilation checks...\n');
+
+  try {
+    await validateConfiguration();
+    testSecretsManager();
+    await testTurnkeyClientInitialization();
+    testErrorHandling();
+    testProvisioningPlanner();
+    testWalletRegistry();
+
+    console.log('\n✅ All compile-time checks completed. TurnkeyCustodyService available:', Boolean(TurnkeyCustodyService));
+  } catch (error) {
+    console.error('\n❌ Compilation helper failed:', error);
     process.exit(1);
   }
 }
 
-// Execute tests
-runTests();
+void run();

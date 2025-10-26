@@ -1,101 +1,129 @@
 /* eslint-disable no-console */
 
-/**
- * Example usage of the Fireblocks Custody Service SDK
- * This demonstrates how an originator would use the SDK
- */
+import 'dotenv/config';
 
-import { FireblocksCustodyService, OriginatorConfiguration } from './src/index';
+import { SessionType } from '@turnkey/sdk-types';
 
-async function main() {
-  // Configuration that would normally come from a form/UI
-  const config: OriginatorConfiguration = {
-    workspace: {
-      name: "ACME Lending",
-      environment: "sandbox"
+import {
+  ConfigurationValidator,
+  TurnkeyClientManager,
+  TurnkeyCustodyService,
+  TurnkeySuborgProvisioner,
+  toTurnkeyServiceError,
+} from './src/index';
+import type { OriginatorConfiguration } from './src/config/types';
+
+const SAMPLE_ORIGINATOR: OriginatorConfiguration = {
+  platform: {
+    environment: 'sandbox',
+    organizationId: 'org_123456789',
+    originator: {
+      originatorId: 'originator_demo',
+      displayName: 'Demo Lending Co.',
     },
-    lendingPartners: {
-      partners: [
-        { id: "LP001", name: "Capital Finance", enabled: true },
-        { id: "LP002", name: "Quick Loans Inc", enabled: true }
-      ]
-    },
-    vaultStructure: {
-      namingConvention: {
-        prefix: "ACME",
-        distributionSuffix: "_DIST_USDC",
-        collectionSuffix: "_COLL_USDC"
-      },
-      defaultAsset: "USDC_ETH5" // Testnet USDC
-    },
-    approval: {
-      workflows: [
-        {
-          workflowId: "wf-standard",
-          name: "Standard Review",
-          trigger: { id: "default", predicate: { kind: "always" } },
-          steps: [
-            {
-              id: "step-finance",
-              name: "Finance Manager Review",
-              approverRoleIds: ["finance_manager"],
-              minApprovals: 1
-            },
-            {
-              id: "step-compliance",
-              name: "Compliance Sign-off",
-              approverRoleIds: ["compliance_officer"],
-              minApprovals: 1,
-              escalationRoleId: "senior_reviewer"
-            }
-          ]
-        },
-        {
-          workflowId: "wf-high-value",
-          name: "High Value Approval",
-          trigger: {
-            id: "high-value",
-            predicate: { kind: "amount_greater_than", amount: "500000" }
+  },
+  provisioning: {
+    nameTemplate: 'DemoLend-{originatorId}',
+    rootQuorumThreshold: 1,
+    rootUsers: [
+      {
+        templateId: 'root-operations',
+        userNameTemplate: 'Operations Admin',
+        apiKeys: [
+          {
+            apiKeyNameTemplate: 'ops-admin-api-key',
+            curveType: 'API_KEY_CURVE_P256',
           },
-          steps: [
+        ],
+        userTags: ['role:operations_admin'],
+      },
+    ],
+    featureToggles: [
+      {
+        name: 'FEATURE_NAME_EMAIL_AUTH',
+        enabled: true,
+        value: 'enabled',
+      },
+    ],
+    defaultAutomationTemplateId: 'automation-primary',
+  },
+  businessModel: {
+    partners: {
+      catalog: [
+        {
+          partnerId: 'LP001',
+          displayName: 'Capital Finance',
+          enabled: true,
+          policyIds: ['policy-standard'],
+        },
+        {
+          partnerId: 'LP002',
+          displayName: 'Quick Loans Inc',
+          enabled: true,
+          flowOverrides: {
+            collection: 'wallet-collection-eu',
+          },
+        },
+      ],
+      defaultPolicyIds: ['policy-standard'],
+    },
+    wallets: {
+      templates: [
+        {
+          templateId: 'wallet-distribution',
+          usage: 'distribution',
+          walletNameTemplate: 'DemoLend-DIST',
+          accounts: [
             {
-              id: "step-senior",
-              name: "Senior Reviewer",
-              approverRoleIds: ["senior_reviewer"],
-              minApprovals: 1
+              alias: 'distribution_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
             },
-            {
-              id: "step-executive",
-              name: "Executive Approval",
-              approverRoleIds: ["executive_committee"],
-              minApprovals: 1,
-              requiresSequentialApproval: true
-            }
           ],
-          timeoutBehaviour: {
-            timeoutHours: 24,
-            onTimeout: "escalate",
-            escalationRoleId: "executive_committee"
-          }
-        }
-      ]
+        },
+        {
+          templateId: 'wallet-collection',
+          usage: 'collection',
+          walletNameTemplate: 'DemoLend-COLL',
+          accounts: [
+            {
+              alias: 'collection_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/1'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+        {
+          templateId: 'wallet-collection-eu',
+          usage: 'collection',
+          walletNameTemplate: 'DemoLend-COLL-EU',
+          accounts: [
+            {
+              alias: 'collection_eu_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/2'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+      ],
+      flows: {
+        distribution: { templateId: 'wallet-distribution' },
+        collection: { templateId: 'wallet-collection' },
+      },
     },
-    transactionLimits: {
-      automated: {
-        singleTransaction: 100000,
-        dailyLimit: 500000,
-        monthlyLimit: 5000000
-      }
-    },
-    apiSettings: {
-      ipWhitelist: ["203.0.113.1", "203.0.113.2"],
-      webhookEndpoint: "https://api.acmelending.com/fireblocks/webhook"
-    },
-    roleDefinitions: [
+  },
+  accessControl: {
+    roles: [
       {
-        roleId: "finance_manager",
-        roleName: "Finance Manager",
-        description: "Reviews standard disbursements",
+        roleId: 'finance_manager',
+        roleName: 'Finance Manager',
+        description: 'Reviews standard disbursements',
         permissions: {
           viewDistributions: true,
           viewCollections: true,
@@ -103,14 +131,15 @@ async function main() {
           approveDisbursements: true,
           viewReports: true,
           manageRoles: false,
-          configureSettings: false
+          configureSettings: false,
         },
-        requiresApproval: false
+        turnkeyUserTagTemplate: 'role:finance_manager',
+        requiresPolicyApproval: false,
       },
       {
-        roleId: "compliance_officer",
-        roleName: "Compliance Officer",
-        description: "Reviews compliance-sensitive transactions",
+        roleId: 'compliance_officer',
+        roleName: 'Compliance Officer',
+        description: 'Reviews high-risk transactions',
         permissions: {
           viewDistributions: true,
           viewCollections: true,
@@ -118,63 +147,115 @@ async function main() {
           approveDisbursements: true,
           viewReports: true,
           manageRoles: false,
-          configureSettings: false
+          configureSettings: false,
         },
-        requiresApproval: true
+        turnkeyUserTagTemplate: 'role:compliance_officer',
+        requiresPolicyApproval: true,
       },
-      {
-        roleId: "senior_reviewer",
-        roleName: "Senior Reviewer",
-        description: "Approves escalated transactions",
-        permissions: {
-          viewDistributions: true,
-          viewCollections: true,
-          initiateDisbursements: false,
-          approveDisbursements: true,
-          viewReports: true,
-          manageRoles: false,
-          configureSettings: false
+    ],
+    automation: {
+      templates: [
+        {
+          templateId: 'automation-primary',
+          userNameTemplate: 'Automation Bot',
+          apiKeys: [
+            {
+              apiKeyNameTemplate: 'automation-primary-key',
+              curveType: 'API_KEY_CURVE_P256',
+            },
+          ],
+          userTags: ['role:automation'],
+          sessionTypes: [SessionType.READ_ONLY, SessionType.READ_WRITE],
         },
-        requiresApproval: true
+      ],
+      defaultTemplateId: 'automation-primary',
+    },
+    policies: {
+      templates: [
+        {
+          templateId: 'policy-standard',
+          policyName: 'Allow distribution transfers',
+          effect: 'EFFECT_ALLOW',
+          condition: {
+            expression: "transaction.amount <= 250000 && transaction.asset == 'USDC'",
+          },
+          consensus: {
+            expression: "user.tag('role:finance_manager') >= 1",
+          },
+          appliesTo: [
+            {
+              type: 'wallet_template',
+              target: 'wallet-distribution',
+            },
+          ],
+        },
+      ],
+      defaultPolicyIds: ['policy-standard'],
+    },
+  },
+  operations: {
+    monitoring: {
+      webhooks: {
+        activity: { urlTemplate: 'https://hooks.demolend.com/activity' },
+        alerts: { urlTemplate: 'https://hooks.demolend.com/alerts' },
       },
-      {
-        roleId: "executive_committee",
-        roleName: "Executive Committee",
-        description: "Final approval authority for large loans",
-        permissions: {
-          viewDistributions: true,
-          viewCollections: true,
-          initiateDisbursements: false,
-          approveDisbursements: true,
-          viewReports: true,
-          manageRoles: false,
-          configureSettings: false
-        },
-        requiresApproval: true
-      }
-    ]
-  };
+      activityPolling: {
+        intervalMs: 1500,
+        numRetries: 40,
+      },
+    },
+    reporting: {
+      enableLedgerExport: true,
+      ledgerExportFrequency: 'monthly',
+      storageBucketRef: 'gs://demolend-reporting',
+    },
+  },
+  compliance: {
+    amlProvider: 'chainalysis',
+    travelRuleRequired: true,
+    sanctionListRefs: ['ofac', 'eu'],
+    auditRequirements: {
+      retentionYears: 7,
+      encryptionRequired: true,
+    },
+  },
+};
+
+async function main(): Promise<void> {
+  const validator = new ConfigurationValidator();
+  const validation = validator.validate(SAMPLE_ORIGINATOR);
+  if (validation.isValid === false) {
+    console.error('Configuration invalid:', validation.errors);
+    process.exit(1);
+  }
+
+  console.log('✅ Configuration validated');
+  console.log(`👥 Partners configured: ${SAMPLE_ORIGINATOR.businessModel.partners.catalog.length}`);
+  console.log(`🏦 Wallet flows: ${Object.keys(SAMPLE_ORIGINATOR.businessModel.wallets.flows).join(', ')}`);
 
   try {
-    // Initialize the custody service
-    const custodyService = new FireblocksCustodyService(config);
-    
-    console.log("✅ Fireblocks Custody Service initialized");
-    console.log("📋 Configuration validated");
-    console.log(`👥 ${config.lendingPartners.partners.length} lending partners configured`);
-    const primaryWorkflow = config.approval.workflows[0];
-    console.log(`🔐 Primary approval workflow: ${primaryWorkflow.name}`);
-    console.log(`💰 Daily transaction limit: $${config.transactionLimits.automated.dailyLimit.toLocaleString()}`);
-    
-    // In a real implementation, you would:
-    // 1. Call custodyService.setup() to provision vaults
-    // 2. Use custodyService to process disbursements
-    // 3. Monitor collections via webhooks
-    
+    await TurnkeyClientManager.initialize({ platform: SAMPLE_ORIGINATOR.platform });
+    console.log('🔐 Turnkey client initialized (credentials detected)');
+
+    const provisioner = new TurnkeySuborgProvisioner();
+    const artifacts = await provisioner.provision(SAMPLE_ORIGINATOR);
+
+    console.log('🏗️  Sub-organization provisioned:', artifacts.provisioningSnapshot.subOrganizationId);
+    artifacts.provisioningSnapshot.walletFlows.forEach((flow) => {
+      console.log(`  • Flow ${flow.flowId} -> wallet ${flow.walletId}`);
+    });
+    console.log('📜 Policies deployed:', artifacts.provisioningSnapshot.policies.map((p) => p.policyId));
   } catch (error) {
-    console.error("❌ Error:", error);
+    console.warn(
+      '⚠️  Provisioning skipped. Provide TURNKEY_* credentials to run this example end-to-end. Reason:',
+      toTurnkeyServiceError(error).message
+    );
   }
+
+  const service = new TurnkeyCustodyService(SAMPLE_ORIGINATOR);
+  console.log('🧰 TurnkeyCustodyService ready:', Boolean(service));
 }
 
-// Run the example
-main().catch(console.error);
+main().catch((error) => {
+  console.error('❌ Unexpected failure:', error);
+});

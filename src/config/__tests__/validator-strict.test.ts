@@ -1,206 +1,308 @@
+import { SessionType } from '@turnkey/sdk-types';
+
 import { ConfigurationValidator } from '../validator-strict';
-import type { OriginatorConfiguration } from '../types';
+import type { OriginatorConfiguration, PartnerConfiguration } from '../types';
 
 const validator = new ConfigurationValidator();
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const baseConfig: OriginatorConfiguration = {
-  workspace: {
-    name: 'Test Company',
+  platform: {
     environment: 'sandbox',
-  },
-  lendingPartners: {
-    partners: [{ id: 'LP001', name: 'Partner 1', enabled: true }],
-  },
-  vaultStructure: {
-    namingConvention: {
-      prefix: 'TEST',
-      distributionSuffix: '_DIST_USDC',
-      collectionSuffix: '_COLL_USDC',
+    organizationId: 'org_123',
+    originator: {
+      originatorId: 'originator_abc',
+      displayName: 'Test Originator',
     },
-    defaultAsset: 'USDC_ETH',
   },
-  approval: {
-    workflows: [
+  provisioning: {
+    nameTemplate: 'ORIG-{originatorId}',
+    rootQuorumThreshold: 1,
+    rootUsers: [
       {
-        workflowId: 'wf-basic',
-        name: 'Basic Review',
-        trigger: {
-          id: 'always',
-          predicate: { kind: 'always' },
-        },
-        steps: [
+        templateId: 'root-user-1',
+        userNameTemplate: 'Root Operator',
+        apiKeys: [
           {
-            id: 'step-review',
-            name: 'Reviewer approval',
-            approverRoleIds: ['junior_reviewer'],
-            minApprovals: 1,
+            apiKeyNameTemplate: 'root-operator-key',
+            curveType: 'API_KEY_CURVE_P256',
           },
         ],
+        userTags: ['role:administrator'],
       },
     ],
-  },
-  transactionLimits: {
-    automated: {
-      singleTransaction: 100000,
-      dailyLimit: 1000000,
-      monthlyLimit: 10000000,
-    },
-  },
-  apiSettings: {
-    ipWhitelist: ['192.0.2.1'],
-    webhookEndpoint: 'https://example.com/webhook',
-  },
-  roleDefinitions: [
-    {
-      roleId: 'junior_reviewer',
-      roleName: 'Junior Reviewer',
-      description: 'Reviews standard disbursements',
-      permissions: {
-        viewDistributions: true,
-        viewCollections: false,
-        initiateDisbursements: false,
-        approveDisbursements: true,
-        viewReports: false,
-        manageRoles: false,
-        configureSettings: false,
+    featureToggles: [
+      {
+        name: 'FEATURE_NAME_EMAIL_AUTH',
+        enabled: true,
+        value: 'enabled',
       },
-      requiresApproval: false,
+    ],
+    defaultAutomationTemplateId: 'auto-primary',
+  },
+  businessModel: {
+    partners: {
+      catalog: [
+        {
+          partnerId: 'LP001',
+          displayName: 'Partner One',
+          enabled: true,
+        },
+      ],
+      defaultPolicyIds: ['policy-distribution-default'],
     },
-    {
-      roleId: 'compliance_officer',
-      roleName: 'Compliance Officer',
-      description: 'Reviews high-risk transactions',
-      permissions: {
-        viewDistributions: true,
-        viewCollections: true,
-        initiateDisbursements: false,
-        approveDisbursements: true,
-        viewReports: true,
-        manageRoles: false,
-        configureSettings: false,
+    wallets: {
+      templates: [
+        {
+          templateId: 'wallet-distribution',
+          usage: 'distribution',
+          walletNameTemplate: 'ORIG-{originatorId}-DIST',
+          accounts: [
+            {
+              alias: 'distribution_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/0'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+        {
+          templateId: 'wallet-collection',
+          usage: 'collection',
+          walletNameTemplate: 'ORIG-{originatorId}-COLL',
+          accounts: [
+            {
+              alias: 'collection_primary',
+              curve: 'CURVE_SECP256K1',
+              pathFormat: 'PATH_FORMAT_BIP32',
+              path: "m/44'/60'/1'/0/0",
+              addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
+            },
+          ],
+        },
+      ],
+      flows: {
+        distribution: { templateId: 'wallet-distribution' },
+        collection: { templateId: 'wallet-collection' },
       },
-      requiresApproval: true,
     },
-  ],
+  },
+  accessControl: {
+    roles: [
+      {
+        roleId: 'senior_reviewer',
+        roleName: 'Senior Reviewer',
+        description: 'Approves higher value transactions',
+        permissions: {
+          viewDistributions: true,
+          viewCollections: true,
+          initiateDisbursements: false,
+          approveDisbursements: true,
+          viewReports: true,
+          manageRoles: false,
+          configureSettings: false,
+        },
+        turnkeyUserTagTemplate: 'role:senior_reviewer',
+        requiresPolicyApproval: true,
+      },
+    ],
+    automation: {
+      templates: [
+        {
+          templateId: 'auto-primary',
+          userNameTemplate: 'ORIG-{originatorId}-automation',
+          apiKeys: [
+            {
+              apiKeyNameTemplate: 'automation-primary-key',
+              curveType: 'API_KEY_CURVE_P256',
+            },
+          ],
+          userTags: ['role:automation'],
+        },
+      ],
+      defaultTemplateId: 'auto-primary',
+      sessionConfig: {
+        readOnly: {
+          type: SessionType.READ_ONLY,
+          defaultExpirationSeconds: 900,
+        },
+        readWrite: {
+          type: SessionType.READ_WRITE,
+          defaultExpirationSeconds: 900,
+        },
+      },
+    },
+    policies: {
+      templates: [
+        {
+          templateId: 'policy-distribution-default',
+          policyName: 'Allow standard distribution',
+          effect: 'EFFECT_ALLOW',
+          condition: {
+            expression: "transaction.amount <= 100000 && transaction.asset == 'USDC'",
+          },
+          consensus: {
+            expression: "user.tag('role:senior_reviewer') >= 1",
+          },
+          appliesTo: [
+            {
+              type: 'wallet_template',
+              target: 'wallet-distribution',
+            },
+          ],
+        },
+      ],
+      defaultPolicyIds: ['policy-distribution-default'],
+    },
+  },
+  operations: {
+    monitoring: {
+      webhooks: {
+        activity: { urlTemplate: 'https://hooks.example.com/activity' },
+      },
+      activityPolling: { intervalMs: 1000, numRetries: 3 },
+    },
+    reporting: {
+      enableLedgerExport: true,
+      ledgerExportFrequency: 'monthly',
+    },
+  },
+  compliance: {
+    amlProvider: 'chainalysis',
+    travelRuleRequired: true,
+  },
 };
 
-describe('ConfigurationValidator (approval workflows)', () => {
-  it('accepts a valid configuration with a simple workflow', async () => {
+describe('ConfigurationValidator', () => {
+  it('accepts a valid configuration', async () => {
     const result = await validator.validate(baseConfig);
     expect(result.isValid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
-  it('rejects workflows with unknown approver roles', async () => {
-    const config: OriginatorConfiguration = {
-      ...baseConfig,
-      approval: {
-        workflows: [
+  it('rejects policies referencing unknown wallet templates', async () => {
+    const config = clone(baseConfig);
+    config.accessControl.policies.templates = [
+      {
+        templateId: 'policy-invalid',
+        policyName: 'Invalid policy',
+        effect: 'EFFECT_ALLOW',
+        condition: { expression: 'true' },
+        consensus: { expression: 'true' },
+        appliesTo: [
           {
-            workflowId: 'wf-invalid-role',
-            name: 'Invalid Role Workflow',
-            trigger: { id: 'always', predicate: { kind: 'always' } },
-            steps: [
-              {
-                id: 'step-invalid',
-                name: 'Invalid step',
-                approverRoleIds: ['nonexistent_role'],
-                minApprovals: 1,
-              },
-            ],
+            type: 'wallet_template',
+            target: 'missing-template',
           },
         ],
       },
-    };
+    ];
+    config.accessControl.policies.defaultPolicyIds = ['policy-invalid'];
 
     const result = await validator.validate(config);
     expect(result.isValid).toBe(false);
     expect(result.errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('roleId "nonexistent_role" is not defined in roleDefinitions')
+        expect.stringContaining('wallet template "missing-template" is not defined'),
       ])
     );
   });
 
-  it('rejects workflows without steps', async () => {
-    const config: OriginatorConfiguration = {
-      ...baseConfig,
-      approval: {
-        workflows: [
-          {
-            workflowId: 'wf-no-steps',
-            name: 'No Steps Workflow',
-            trigger: { id: 'always', predicate: { kind: 'always' } },
-            steps: [],
-          },
-        ],
-      },
-    };
-
-    const result = await validator.validate(config);
-    expect(result.isValid).toBe(false);
-    expect(result.errors).toContain(
-      'approval.workflows[0]: at least one approval step is required'
-    );
-  });
-
-  it('rejects workflows with invalid predicate values', async () => {
-    const config: OriginatorConfiguration = {
-      ...baseConfig,
-      approval: {
-        workflows: [
-          {
-            workflowId: 'wf-invalid-condition',
-            name: 'Invalid condition',
-            trigger: {
-              id: 'amount-check',
-              predicate: { kind: 'amount_greater_than', amount: 'abc' },
-            },
-            steps: baseConfig.approval.workflows[0].steps,
-          },
-        ],
-      },
-    };
+  it('rejects partner overrides with unknown automation user templates', async () => {
+    const config = clone(baseConfig);
+    config.businessModel.partners.catalog = [
+      clone(baseConfig.businessModel.partners.catalog[0]),
+    ];
+    config.businessModel.partners.catalog[0].automationUserTemplateId = 'missing-automation';
 
     const result = await validator.validate(config);
     expect(result.isValid).toBe(false);
     expect(result.errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('predicate amount must be a valid decimal string')
+        expect.stringContaining('automation user template "missing-automation" is not defined'),
       ])
     );
   });
 
-  it('produces warnings when sequential approval has insufficient minApprovals', async () => {
-    const config: OriginatorConfiguration = {
-      ...baseConfig,
-      approval: {
-        workflows: [
+  it('rejects policies without a valid effect', async () => {
+    const config = clone(baseConfig);
+    config.accessControl.policies.templates = [
+      {
+        templateId: 'policy-missing-effect',
+        policyName: 'Missing effect',
+        effect: '' as any,
+        condition: { expression: 'true' },
+        consensus: { expression: 'true' },
+      },
+    ];
+    config.accessControl.policies.defaultPolicyIds = ['policy-missing-effect'];
+
+    const result = await validator.validate(config);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([expect.stringContaining('effect is required')]));
+  });
+
+  it('rejects duplicate wallet aliases across templates', async () => {
+    const config = clone(baseConfig);
+    config.businessModel.wallets.templates = [
+      ...clone(baseConfig.businessModel.wallets.templates),
+      {
+        templateId: 'wallet-extra',
+        usage: 'custom',
+        walletNameTemplate: 'ORIG-{originatorId}-EXTRA',
+        accounts: [
           {
-            workflowId: 'wf-warning',
-            name: 'Warning workflow',
-            trigger: { id: 'always', predicate: { kind: 'always' } },
-            steps: [
-              {
-                id: 'step-sequential',
-                name: 'Sequential with warning',
-                approverRoleIds: ['junior_reviewer', 'compliance_officer'],
-                minApprovals: 1,
-                requiresSequentialApproval: true,
-              },
-            ],
+            alias: 'distribution_primary',
+            curve: 'CURVE_SECP256K1',
+            pathFormat: 'PATH_FORMAT_BIP32',
+            path: "m/44'/60'/2'/0/0",
+            addressFormat: 'ADDRESS_FORMAT_ETHEREUM',
           },
         ],
       },
-    };
+    ];
 
     const result = await validator.validate(config);
-    expect(result.isValid).toBe(true);
-    expect(result.warnings).toEqual(
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
       expect.arrayContaining([
-        expect.stringContaining(
-          'requiresSequentialApproval is true but minApprovals is less than approverRoleIds length'
-        )
+        expect.stringContaining('alias "distribution_primary" is already used by another wallet template'),
+      ])
+    );
+  });
+
+  it('rejects partners with non-boolean enabled values', async () => {
+    const config = clone(baseConfig);
+    config.businessModel.partners.catalog = [
+      clone(baseConfig.businessModel.partners.catalog[0]),
+      {
+        partnerId: 'LP002',
+        displayName: 'Partner Two',
+        enabled: 'true' as unknown as boolean,
+      } as PartnerConfiguration,
+    ];
+
+    const result = await validator.validate(config);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('enabled must be a boolean'),
+      ])
+    );
+  });
+
+  it('rejects roles with non-boolean permission flags', async () => {
+    const config = clone(baseConfig);
+    const role = clone(baseConfig.accessControl.roles[0]);
+    role.permissions.initiateDisbursements = 'no' as unknown as boolean;
+    config.accessControl.roles = [role];
+
+    const result = await validator.validate(config);
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('permissions.initiateDisbursements must be a boolean'),
       ])
     );
   });

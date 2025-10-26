@@ -1,7 +1,7 @@
 {
-  "name": "fireblocks-custody-service",
+  "name": "turnkey-custody-service",
   "version": "1.0.0",
-  "description": "Secure Fireblocks custody service for loan disbursement",
+  "description": "Turnkey-based custody service scaffolding for loan originators",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,20 +16,19 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "ci": "npm run lint && npm run test && npm run typecheck",
-    "prepare": "husky install",
-    "example:setup": "ts-node examples/basic-setup.ts"
+    "example:setup": "echo 'Use Turnkey CLI examples instead'"
   },
   "keywords": [
-    "fireblocks",
+    "turnkey",
     "custody",
-    "blockchain",
+    "loan-origination",
     "typescript"
   ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@fireblocks/ts-sdk": "^12.1.2",
+    "@turnkey/sdk-server": "^4.10.4",
     "dotenv": "^17.2.3"
   },
   "devDependencies": {
@@ -40,7 +39,6 @@
     "eslint": "^9.38.0",
     "eslint-plugin-no-secrets": "^2.2.1",
     "eslint-plugin-security": "^3.0.1",
-    "husky": "^9.1.7",
     "jest": "^30.2.0",
     "lint-staged": "^16.2.6",
     "prettier": "^3.6.2",
@@ -62,8 +60,13 @@
       "<rootDir>/src"
     ],
     "testMatch": [
-      "**/__tests__/**/*.ts",
+      "**/__tests__/**/*.test.ts",
       "**/?(*.)+(spec|test).ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/fixtures/",
+      "/utils/"
     ],
     "collectCoverageFrom": [
       "src/**/*.ts",

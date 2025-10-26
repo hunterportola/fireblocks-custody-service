@@ -1,80 +1,54 @@
 /* eslint-disable no-console */
 
 import 'dotenv/config';
-import { Fireblocks, BasePath, TransferPeerPathType } from '@fireblocks/ts-sdk';
 
-// Read API keys from environment variables
-const apiKey = process.env.FIREBLOCKS_API_KEY;
-const secretKey = process.env.FIREBLOCKS_SECRET_KEY;
+import { TurnkeyClientManager } from './core/turnkey-client';
+import { toTurnkeyServiceError } from './core/error-handler';
+import type { TurnkeyEnvironment } from './config/types';
+import { isNonEmptyString } from './utils/type-guards';
 
-// Check if the keys are loaded correctly
-if (!apiKey || !secretKey) {
-  throw new Error('API key and secret key must be set in the .env file');
-}
+async function bootstrap(): Promise<void> {
+  const apiPrivateKey = process.env.TURNKEY_API_PRIVATE_KEY;
+  const apiPublicKey = process.env.TURNKEY_API_PUBLIC_KEY;
+  const apiKeyId = process.env.TURNKEY_API_KEY_ID;
 
-// Initialize a Fireblocks API instance with environment variables
-const fireblocks = new Fireblocks({
-  apiKey: apiKey,
-  basePath: BasePath.Sandbox, // or assign directly to "https://sandbox-api.fireblocks.io/v1";
-  secretKey: secretKey,
-});
+  const hasCredentials =
+    isNonEmptyString(apiPrivateKey) && isNonEmptyString(apiPublicKey) && isNonEmptyString(apiKeyId);
 
-// Export functions for use in other modules
-export { fireblocks };
+  if (!hasCredentials) {
+    console.log('Turnkey credentials not configured; skipping client initialization.');
+    return;
+  }
 
-// Example usage - uncomment to run
-// createVault()
-// getVaultPagedAccounts(10)
-// createTransaction("ETH_TEST5", "0.1", "0", "1")
+  const organizationIdValue = process.env.TURNKEY_ORGANIZATION_ID;
+  if (!isNonEmptyString(organizationIdValue)) {
+    console.warn('TURNKEY_ORGANIZATION_ID not set; unable to initialize client');
+    return;
+  }
+  const organizationId = organizationIdValue.trim();
 
-// creating a new vault account
-export async function createVault() {
+  const environment = (process.env.TURNKEY_ENVIRONMENT as TurnkeyEnvironment) ?? 'sandbox';
+
   try {
-    const vault = await fireblocks.vaults.createVaultAccount({
-      createVaultAccountRequest: {
-        name: 'My First Vault Account',
-        hiddenOnUI: false,
-        autoFuel: false,
+    await TurnkeyClientManager.initialize({
+      platform: {
+        organizationId,
+        environment,
+        apiBaseUrl: process.env.TURNKEY_API_BASE_URL,
+        originator: {
+          originatorId: 'bootstrap_runner',
+          displayName: 'Bootstrap Runner',
+        },
       },
     });
-    console.log(JSON.stringify(vault.data, null, 2));
-  } catch (e) {
-    console.log(e);
+    console.log('Turnkey client ready.');
+  } catch (error) {
+    const serviceError = toTurnkeyServiceError(error);
+    console.error('Failed to initialize Turnkey client:', serviceError.message);
   }
 }
 
-//retrieve vault accounts
-export async function getVaultPagedAccounts(limit: number) {
-  try {
-    const vaults = await fireblocks.vaults.getPagedVaultAccounts({
-      limit,
-    });
-    console.log(JSON.stringify(vaults.data, null, 2));
-  } catch (e) {
-    console.log(e);
-  }
-}
-
-// create a transaction
-export async function createTransaction(
-  assetId: string,
-  amount: string,
-  srcId: string,
-  destId: string
-) {
-  let payload = {
-    assetId,
-    amount,
-    source: {
-      type: TransferPeerPathType.VaultAccount,
-      id: String(srcId),
-    },
-    destination: {
-      type: TransferPeerPathType.VaultAccount,
-      id: String(destId),
-    },
-    note: 'Your first transaction!',
-  };
-  const result = await fireblocks.transactions.createTransaction({ transactionRequest: payload });
-  console.log(JSON.stringify(result.data, null, 2));
-}
+bootstrap().catch((error) => {
+  const serviceError = toTurnkeyServiceError(error);
+  console.error('Unexpected bootstrap failure:', serviceError.message);
+});

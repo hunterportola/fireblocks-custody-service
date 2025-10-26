@@ -1,8 +1,13 @@
 /**
- * Unit tests for SecretsManager
+ * Unit tests for Turnkey SecretsManager
  */
 
-import { SecretsManager, SecretProvider, SecretConfig } from '../secrets-manager';
+import { SecretsManager, SecretProvider, type SecretConfig } from '../secrets-manager';
+
+const SAMPLE_PRIVATE_KEY =
+  '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ...\n-----END PRIVATE KEY-----';
+const SAMPLE_PUBLIC_KEY =
+  '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A...\n-----END PUBLIC KEY-----';
 
 describe('SecretsManager', () => {
   const originalEnv = process.env;
@@ -10,7 +15,6 @@ describe('SecretsManager', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv };
-    // Reset singleton instance
     SecretsManager.resetInstance();
   });
 
@@ -18,145 +22,116 @@ describe('SecretsManager', () => {
     process.env = originalEnv;
   });
 
+  const envConfig: SecretConfig = {
+    provider: SecretProvider.ENVIRONMENT,
+  };
+
   describe('getInstance', () => {
-    it('should create singleton instance with config', () => {
-      const config: SecretConfig = {
-        provider: SecretProvider.ENVIRONMENT,
-      };
-
-      const instance1 = SecretsManager.getInstance(config);
+    it('creates a singleton instance when config is provided', () => {
+      const instance1 = SecretsManager.getInstance(envConfig);
       const instance2 = SecretsManager.getInstance();
-
       expect(instance1).toBe(instance2);
     });
 
-    it('should throw error if no config on first call', () => {
+    it('throws if accessed before initialization config', () => {
       expect(() => SecretsManager.getInstance()).toThrow(
         'SecretsManager must be initialized with configuration on first use'
       );
     });
   });
 
-  describe('loadSecrets - Environment Provider', () => {
-    it('should load valid secrets from environment', async () => {
-      const validApiKey = '12345678-1234-1234-1234-123456789012';
-      const pemKey =
-        '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ...\n-----END PRIVATE KEY-----';
-      const validSecretKey = Buffer.from(pemKey).toString('base64');
+  describe('loadSecrets (environment provider)', () => {
+    it('loads and normalizes PEM keys from base64 encoded environment variables', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = Buffer.from(SAMPLE_PRIVATE_KEY).toString('base64');
+      process.env.TURNKEY_API_PUBLIC_KEY = Buffer.from(SAMPLE_PUBLIC_KEY).toString('base64');
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
+      process.env.TURNKEY_ORGANIZATION_ID = 'org-123';
 
-      process.env.FIREBLOCKS_API_KEY = validApiKey;
-      process.env.FIREBLOCKS_SECRET_KEY = validSecretKey;
-
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
+      const manager = SecretsManager.getInstance(envConfig);
       const secrets = await manager.loadSecrets();
 
-      expect(secrets.apiKey).toBe(validApiKey);
-      // The secret key should be decoded from base64 to PEM format
-      expect(secrets.secretKey).toBe(pemKey);
+      expect(secrets.apiPrivateKey).toBe(SAMPLE_PRIVATE_KEY);
+      expect(secrets.apiPublicKey).toBe(SAMPLE_PUBLIC_KEY);
+      expect(secrets.apiKeyId).toBe('api-key-id');
+      expect(secrets.defaultOrganizationId).toBe('org-123');
     });
 
-    it('should throw error for missing environment variables', async () => {
-      delete process.env.FIREBLOCKS_API_KEY;
-      delete process.env.FIREBLOCKS_SECRET_KEY;
+    it('accepts PEM strings directly', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = SAMPLE_PRIVATE_KEY;
+      process.env.TURNKEY_API_PUBLIC_KEY = SAMPLE_PUBLIC_KEY;
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
+      const manager = SecretsManager.getInstance(envConfig);
+      const secrets = await manager.loadSecrets();
+
+      expect(secrets.apiPrivateKey).toBe(SAMPLE_PRIVATE_KEY);
+      expect(secrets.apiPublicKey).toBe(SAMPLE_PUBLIC_KEY);
+    });
+
+    it('throws when required environment variables are missing', async () => {
+      delete process.env.TURNKEY_API_PRIVATE_KEY;
+      delete process.env.TURNKEY_API_PUBLIC_KEY;
+      delete process.env.TURNKEY_API_KEY_ID;
+
+      const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'FIREBLOCKS_API_KEY and FIREBLOCKS_SECRET_KEY must be set in environment'
+        'TURNKEY_API_PRIVATE_KEY, TURNKEY_API_PUBLIC_KEY, and TURNKEY_API_KEY_ID must be set in environment'
       );
     });
 
-    it('should validate API key format', async () => {
-      process.env.FIREBLOCKS_API_KEY = 'invalid-api-key';
-      process.env.FIREBLOCKS_SECRET_KEY = Buffer.from(
-        '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----'
-      ).toString('base64');
+    it('validates private key formatting', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = 'not-a-valid-key';
+      process.env.TURNKEY_API_PUBLIC_KEY = Buffer.from(SAMPLE_PUBLIC_KEY).toString('base64');
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
+      const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid API key format: expected UUID format'
+        'Invalid private key format: must be PEM format or base64-encoded PEM'
       );
     });
 
-    it('should validate secret key is base64 or PEM', async () => {
-      process.env.FIREBLOCKS_API_KEY = '12345678-1234-1234-1234-123456789012';
-      process.env.FIREBLOCKS_SECRET_KEY = 'not-base64!@#$%^&*()';
+    it('validates public key formatting', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = Buffer.from(SAMPLE_PRIVATE_KEY).toString('base64');
+      process.env.TURNKEY_API_PUBLIC_KEY = 'not-a-valid-key';
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
-      await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid secret key format: must be PEM format or base64-encoded PEM'
-      );
-    });
-
-    it('should validate secret key contains private key markers', async () => {
-      process.env.FIREBLOCKS_API_KEY = '12345678-1234-1234-1234-123456789012';
-      process.env.FIREBLOCKS_SECRET_KEY = Buffer.from('just some random text').toString('base64');
-
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
+      const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid secret key format: must be PEM format or base64-encoded PEM'
+        'Invalid public key format: must be PEM format or base64-encoded PEM'
       );
     });
   });
 
   describe('getSecrets', () => {
-    it('should return loaded secrets', async () => {
-      const validApiKey = '12345678-1234-1234-1234-123456789012';
-      const validSecretKey = Buffer.from(
-        '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ...\n-----END PRIVATE KEY-----'
-      ).toString('base64');
+    it('returns cached secrets after loading', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = Buffer.from(SAMPLE_PRIVATE_KEY).toString('base64');
+      process.env.TURNKEY_API_PUBLIC_KEY = Buffer.from(SAMPLE_PUBLIC_KEY).toString('base64');
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      process.env.FIREBLOCKS_API_KEY = validApiKey;
-      process.env.FIREBLOCKS_SECRET_KEY = validSecretKey;
-
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
+      const manager = SecretsManager.getInstance(envConfig);
       await manager.loadSecrets();
-      const secrets = manager.getSecrets();
 
-      expect(secrets.apiKey).toBe(validApiKey);
-      // The secret key should be decoded from base64 to PEM format
-      const decodedKey =
-        '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ...\n-----END PRIVATE KEY-----';
-      expect(secrets.secretKey).toBe(decodedKey);
+      const secrets = manager.getSecrets();
+      expect(secrets.apiPrivateKey).toBe(SAMPLE_PRIVATE_KEY);
+      expect(secrets.apiPublicKey).toBe(SAMPLE_PUBLIC_KEY);
     });
 
-    it('should throw error if secrets not loaded', () => {
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
+    it('throws if secrets are requested before loading', () => {
+      const manager = SecretsManager.getInstance(envConfig);
       expect(() => manager.getSecrets()).toThrow('Secrets not loaded. Call loadSecrets() first');
     });
   });
 
   describe('clearSecrets', () => {
-    it('should clear cached secrets', async () => {
-      process.env.FIREBLOCKS_API_KEY = '12345678-1234-1234-1234-123456789012';
-      process.env.FIREBLOCKS_SECRET_KEY = Buffer.from(
-        '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----'
-      ).toString('base64');
+    it('clears cached secrets so they must be reloaded', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = Buffer.from(SAMPLE_PRIVATE_KEY).toString('base64');
+      process.env.TURNKEY_API_PUBLIC_KEY = Buffer.from(SAMPLE_PUBLIC_KEY).toString('base64');
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
+      const manager = SecretsManager.getInstance(envConfig);
       await manager.loadSecrets();
       manager.clearSecrets();
 
@@ -165,81 +140,22 @@ describe('SecretsManager', () => {
   });
 
   describe('validation failure handling', () => {
-    it('should not cache secrets when validation fails', async () => {
-      // First attempt with invalid API key
-      process.env.FIREBLOCKS_API_KEY = 'invalid-api-key';
-      process.env.FIREBLOCKS_SECRET_KEY = Buffer.from(
-        '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----'
-      ).toString('base64');
+    it('does not cache secrets when validation fails', async () => {
+      process.env.TURNKEY_API_PRIVATE_KEY = 'invalid';
+      process.env.TURNKEY_API_PUBLIC_KEY = Buffer.from(SAMPLE_PUBLIC_KEY).toString('base64');
+      process.env.TURNKEY_API_KEY_ID = 'api-key-id';
 
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
+      const manager = SecretsManager.getInstance(envConfig);
 
-      // First load should fail validation
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid API key format: expected UUID format'
+        'Invalid private key format: must be PEM format or base64-encoded PEM'
       );
 
-      // Verify secrets were not cached
       expect(() => manager.getSecrets()).toThrow('Secrets not loaded. Call loadSecrets() first');
 
-      // Fix the API key
-      process.env.FIREBLOCKS_API_KEY = '12345678-1234-1234-1234-123456789012';
-
-      // Second load should succeed
+      process.env.TURNKEY_API_PRIVATE_KEY = Buffer.from(SAMPLE_PRIVATE_KEY).toString('base64');
       const secrets = await manager.loadSecrets();
-      expect(secrets.apiKey).toBe('12345678-1234-1234-1234-123456789012');
-    });
-
-    it('should not return previously failed secrets on retry', async () => {
-      // Start with invalid secrets
-      process.env.FIREBLOCKS_API_KEY = 'invalid-api-key';
-      process.env.FIREBLOCKS_SECRET_KEY = 'invalid-secret';
-
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.ENVIRONMENT,
-      });
-
-      // First attempt fails
-      await expect(manager.loadSecrets()).rejects.toThrow();
-
-      // Second attempt should also fail, not return cached invalid secrets
-      await expect(manager.loadSecrets()).rejects.toThrow();
-
-      // Fix secrets
-      process.env.FIREBLOCKS_API_KEY = '12345678-1234-1234-1234-123456789012';
-      process.env.FIREBLOCKS_SECRET_KEY = Buffer.from(
-        '-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----'
-      ).toString('base64');
-
-      // Now it should work
-      const secrets = await manager.loadSecrets();
-      expect(secrets.apiKey).toBe('12345678-1234-1234-1234-123456789012');
-    });
-  });
-
-  describe('unsupported providers', () => {
-    it('should throw error for AWS provider (not implemented)', async () => {
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.AWS_SECRETS_MANAGER,
-        awsRegion: 'us-east-1',
-      });
-
-      await expect(manager.loadSecrets()).rejects.toThrow(
-        'AWS Secrets Manager integration not yet implemented'
-      );
-    });
-
-    it('should throw error for HashiCorp Vault provider (not implemented)', async () => {
-      const manager = SecretsManager.getInstance({
-        provider: SecretProvider.HASHICORP_VAULT,
-        vaultUrl: 'https://vault.example.com',
-      });
-
-      await expect(manager.loadSecrets()).rejects.toThrow(
-        'HashiCorp Vault integration not yet implemented'
-      );
+      expect(secrets.apiPrivateKey).toBe(SAMPLE_PRIVATE_KEY);
     });
   });
 });

@@ -48,9 +48,9 @@ describe('TurnkeyWalletManager', () => {
 
   it('delegates wallet tag updates to updateWallet', async () => {
     const manager = new TurnkeyWalletManager();
-    await expect(
+    expect(() =>
       manager.tagWallet('sub-org', 'wallet-123', ['tag:one', 'tag:two'])
-    ).rejects.toThrow(/wallet tagging is not supported/i);
+    ).toThrow(/wallet tagging is not supported/i);
     expect(apiClientMock.updateWallet).not.toHaveBeenCalled();
   });
 });

@@ -228,39 +228,32 @@ describe('Error Handler', () => {
 
       const promise = retryWithBackoff(operation, 3, 100);
 
-      // First attempt fails immediately
       await jest.advanceTimersByTimeAsync(0);
       expect(operation).toHaveBeenCalledTimes(1);
 
-      // Wait for first retry (100ms)
       await jest.advanceTimersByTimeAsync(100);
       expect(operation).toHaveBeenCalledTimes(2);
 
-      // Wait for second retry (200ms exponential backoff)
       await jest.advanceTimersByTimeAsync(200);
       expect(operation).toHaveBeenCalledTimes(3);
 
-      const result = await promise;
-      expect(result).toBe('success');
+      await expect(promise).resolves.toBe('success');
     });
 
     it('fails after max retries', async () => {
       const operation = jest.fn().mockRejectedValue(new Error('Persistent error'));
 
-      const promise = retryWithBackoff(operation, 2, 50);
+      // Start the retry operation and immediately catch it to prevent unhandled rejection
+      const promise = retryWithBackoff(operation, 2, 50).catch(e => e);
+      
+      // Advance timers to process all retries
+      await jest.runAllTimersAsync();
 
-      // Advance through all retries
-      await jest.advanceTimersByTimeAsync(0);   // First attempt
-      await jest.advanceTimersByTimeAsync(50);  // First retry
-      await jest.advanceTimersByTimeAsync(100); // Second retry would exceed max
-
-      try {
-        await promise;
-        fail('Expected promise to reject');
-      } catch (error) {
-        expect(error).toBeInstanceOf(TurnkeyServiceError);
-        expect(error.message).toBe('Persistent error');
-      }
+      // Now check the caught error
+      const error = await promise;
+      expect(error).toBeInstanceOf(TurnkeyServiceError);
+      expect(error.message).toBe('Persistent error');
+      expect(error.code).toBe(ErrorCodes.API_ERROR);
       
       expect(operation).toHaveBeenCalledTimes(2);
     });
@@ -296,21 +289,19 @@ describe('Error Handler', () => {
 
       const promise = retryWithBackoff(operation, 4, 100);
 
-      // Track timing
-      await jest.advanceTimersByTimeAsync(0);    // First attempt
+      await jest.advanceTimersByTimeAsync(0);
       expect(operation).toHaveBeenCalledTimes(1);
 
-      await jest.advanceTimersByTimeAsync(100);  // 100ms * 2^0
+      await jest.advanceTimersByTimeAsync(100);
       expect(operation).toHaveBeenCalledTimes(2);
 
-      await jest.advanceTimersByTimeAsync(200);  // 100ms * 2^1
+      await jest.advanceTimersByTimeAsync(200);
       expect(operation).toHaveBeenCalledTimes(3);
 
-      await jest.advanceTimersByTimeAsync(400);  // 100ms * 2^2
+      await jest.advanceTimersByTimeAsync(400);
       expect(operation).toHaveBeenCalledTimes(4);
 
-      const result = await promise;
-      expect(result).toBe('success');
+      await expect(promise).resolves.toBe('success');
     });
   });
 

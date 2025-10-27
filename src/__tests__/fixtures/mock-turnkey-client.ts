@@ -11,6 +11,7 @@ export class MockTurnkeyClient {
   createActivity = jest.fn();
   pollActivity = jest.fn();
   resolveAutomationApiKeys = jest.fn();
+  signTransaction = jest.fn();
   
   // Additional helper methods for test setup
   reset(): void {
@@ -21,6 +22,7 @@ export class MockTurnkeyClient {
     this.createActivity.mockReset();
     this.pollActivity.mockReset();
     this.resolveAutomationApiKeys.mockReset();
+    this.signTransaction.mockReset();
   }
 
   // Setup common successful responses

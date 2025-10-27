@@ -42,6 +42,7 @@ type ApiKeyParams = TurnkeyDefs['v1ApiKeyParamsV2'];
 type AuthenticatorParams = TurnkeyDefs['v1AuthenticatorParamsV2'];
 type OauthProviderParams = TurnkeyDefs['v1OauthProviderParams'];
 type WalletAccountParams = TurnkeyDefs['v1WalletAccountParams'];
+type TransactionType = TurnkeyDefs['v1TransactionType'];
 
 type ActivityResponseEnvelope = { activity: TActivity };
 
@@ -173,6 +174,27 @@ export interface TurnkeyRuntimeConfig {
   events?: ActivityEventEmitter;
 }
 
+export interface SignTransactionParams {
+  subOrganizationId: string;
+  signWith: string;
+  unsignedTransaction: string;
+  transactionType?: TransactionType;
+  automationTemplateId?: string;
+}
+
+export interface SignTransactionResult {
+  signedTransaction: string;
+  activityId: string;
+}
+
+export interface SignAndSendTransactionParams extends SignTransactionParams {
+  broadcast(signedTransaction: string): Promise<string>;
+}
+
+export interface SignAndSendTransactionResult extends SignTransactionResult {
+  transactionHash: string;
+}
+
 interface ClientCacheKey {
   subOrgId: string;
   templateId?: string;
@@ -201,6 +223,10 @@ export class TurnkeyClientManager {
       throw new TurnkeyServiceError('Turnkey client manager not initialized', ErrorCodes.MISSING_CREDENTIALS);
     }
     return TurnkeyClientManager.instance;
+  }
+
+  static isInitialized(): boolean {
+    return TurnkeyClientManager.instance !== null;
   }
 
   static reset(): void {
@@ -1354,5 +1380,123 @@ export class TurnkeyClientManager {
         this.clientCache.delete(key);
       }
     }
+  }
+
+  async signTransaction(params: SignTransactionParams): Promise<SignTransactionResult> {
+    const { subOrganizationId, signWith, unsignedTransaction } = params;
+    if (!this.isUsableIdentifier(signWith)) {
+      throw new TurnkeyServiceError('signWith identifier is required to sign transaction', ErrorCodes.INVALID_CONFIG, undefined, {
+        signWith,
+      });
+    }
+
+    if (!this.isUsableIdentifier(unsignedTransaction)) {
+      throw new TurnkeyServiceError(
+        'Unsigned transaction payload is required to sign transaction',
+        ErrorCodes.INVALID_CONFIG,
+        undefined,
+        { unsignedTransaction }
+      );
+    }
+
+    const payload = {
+      timestampMs: Date.now().toString(),
+      type: 'ACTIVITY_TYPE_SIGN_TRANSACTION_V2',
+      organizationId: subOrganizationId,
+      parameters: {
+        signWith,
+        unsignedTransaction,
+        type: params.transactionType ?? 'TRANSACTION_TYPE_ETHEREUM',
+      },
+    };
+
+    const handle = await this.submitActivity('/public/v1/submit/sign_transaction', payload, {
+      pollForResult: true,
+      subOrganizationId,
+      automationTemplateId: params.automationTemplateId,
+    });
+
+    const outcome = await handle.wait();
+    const transactionType = params.transactionType ?? 'TRANSACTION_TYPE_ETHEREUM';
+    const signedTransaction = this.extractSignedTransaction(outcome.raw.result, transactionType);
+    if (!isNonEmptyString(signedTransaction)) {
+      throw new TurnkeyServiceError(
+        'Turnkey sign transaction result did not include signedTransaction',
+        ErrorCodes.API_ERROR,
+        undefined,
+        outcome.raw.result
+      );
+    }
+
+    return {
+      signedTransaction,
+      activityId: outcome.activityId,
+    };
+  }
+
+  async signAndSendTransaction(
+    params: SignAndSendTransactionParams
+  ): Promise<SignAndSendTransactionResult> {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const { broadcast, ...signParamsRaw } = params;
+    if (typeof broadcast !== 'function') {
+      throw new TurnkeyServiceError(
+        'Broadcast callback is required to sign and send transaction',
+        ErrorCodes.INVALID_CONFIG,
+        undefined,
+        {
+          subOrganizationId: params.subOrganizationId,
+          signWith: params.signWith,
+        }
+      );
+    }
+
+    const signParams = signParamsRaw as SignTransactionParams;
+    const signResult = await this.signTransaction(signParams);
+
+    const transactionHash = await broadcast(signResult.signedTransaction);
+    if (!isNonEmptyString(transactionHash)) {
+      throw new TurnkeyServiceError(
+        'Broadcast did not return transaction hash',
+        ErrorCodes.API_ERROR,
+        undefined,
+        { signWith: signParams.signWith }
+      );
+    }
+
+    return {
+      ...signResult,
+      transactionHash,
+    };
+  }
+
+  private isUsableIdentifier(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0 && value.trim() !== 'pending';
+  }
+
+  private extractSignedTransaction(result: unknown, transactionType: string): string | undefined {
+    if (!isPlainObject(result)) {
+      return undefined;
+    }
+
+    const payload = result as { signTransactionResult?: unknown };
+    const signResult = payload.signTransactionResult;
+    if (!isPlainObject(signResult)) {
+      return undefined;
+    }
+
+    const signed = (signResult as { signedTransaction?: unknown }).signedTransaction;
+    if (!isNonEmptyString(signed)) {
+      return undefined;
+    }
+    
+    // Only add 0x prefix for Ethereum/EVM transactions
+    // Other chains like Solana return base64, Bitcoin returns hex without prefix, etc.
+    if (transactionType === 'TRANSACTION_TYPE_ETHEREUM') {
+      return signed.startsWith('0x') ? signed : `0x${signed}`;
+    }
+    
+    // Return raw payload for non-EVM chains
+    return signed;
   }
 }

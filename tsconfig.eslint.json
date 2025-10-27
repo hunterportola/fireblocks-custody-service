@@ -4,6 +4,8 @@
     "src/**/*",
     "examples/**/*",
     "tests/**/*",
+    "test-data/**/*",
+    "scripts/**/*",
     "test-compilation.ts",
     "example-usage.ts"
   ],

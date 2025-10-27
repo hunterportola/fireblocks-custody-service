@@ -84,8 +84,10 @@ export default tseslint.config(
       'node_modules/',
       'coverage/',
       'ts-sdk/',
+      'sdk/',
       '*.js',
-      '!eslint.config.js'
+      '!eslint.config.js',
+      'example-usage.ts'
     ]
   }
 );

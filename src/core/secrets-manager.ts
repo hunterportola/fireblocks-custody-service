@@ -43,6 +43,8 @@ export interface PasskeyAttestationSecret {
   };
 }
 
+import { createECDH, createPrivateKey, createPublicKey } from 'node:crypto';
+
 import { isNonEmptyString, isRecord } from '../utils/type-guards';
 
 export class SecretsManager {
@@ -51,6 +53,9 @@ export class SecretsManager {
   private automationCache: Record<string, AutomationKeyCredentials> = {};
   private passkeyAttestationCache: Record<string, PasskeyAttestationSecret> = {};
   private readonly config: SecretConfig;
+
+  private static readonly P256_PRIME = BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff');
+  private static readonly P256_B = BigInt('0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b');
 
   private constructor(config: SecretConfig) {
     this.config = config;
@@ -256,17 +261,169 @@ export class SecretsManager {
       return trimmed;
     }
 
+    // Try base64 -> PEM first
     try {
       const decoded = Buffer.from(trimmed, 'base64').toString('utf-8').trim();
       if (decoded.includes('-----BEGIN')) {
         return decoded;
       }
-      throw new Error();
     } catch {
-      throw new Error(
-        `Invalid ${keyType} key format: must be PEM format or base64-encoded PEM`
-      );
+      // ignore and try other formats
     }
+
+    if (/^[0-9a-fA-F]+$/.test(trimmed)) {
+      const normalizedHex = trimmed.length % 2 === 0 ? trimmed : `0${trimmed}`;
+      const pem = keyType === 'private'
+        ? SecretsManager.hexP256PrivateToPem(normalizedHex)
+        : SecretsManager.hexP256PublicToPem(normalizedHex);
+      if (pem !== null) {
+        return pem;
+      }
+    }
+
+    throw new Error(
+      `Invalid ${keyType} key format: must be PEM, base64-encoded PEM, or Turnkey hex`
+    );
+  }
+
+  private static hexP256PrivateToPem(hex: string): string | null {
+    try {
+      const privateBytes = Buffer.from(hex, 'hex');
+      if (privateBytes.length !== 32) {
+        return null;
+      }
+
+      const ecdh = createECDH('prime256v1');
+      ecdh.setPrivateKey(privateBytes);
+      const publicUncompressed = ecdh.getPublicKey(undefined, 'uncompressed');
+      const x = publicUncompressed.slice(1, 33);
+      const y = publicUncompressed.slice(33, 65);
+
+      const jwk = {
+        kty: 'EC',
+        crv: 'P-256',
+        d: SecretsManager.toBase64Url(privateBytes),
+        x: SecretsManager.toBase64Url(x),
+        y: SecretsManager.toBase64Url(y),
+      } as const;
+
+      const keyObject = createPrivateKey({ key: jwk, format: 'jwk' });
+      return keyObject.export({ format: 'pem', type: 'pkcs8' }).toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private static hexP256PublicToPem(hex: string): string | null {
+    try {
+      const point = Buffer.from(hex, 'hex');
+      const coords = SecretsManager.decodeP256Point(point);
+      if (!coords) {
+        return null;
+      }
+
+      const keyObject = createPublicKey({
+        key: {
+          kty: 'EC',
+          crv: 'P-256',
+          x: coords.x,
+          y: coords.y,
+        },
+        format: 'jwk',
+      });
+
+      return keyObject.export({ format: 'pem', type: 'spki' }).toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private static decodeP256Point(point: Buffer): { x: string; y: string } | null {
+    if (point.length === 65 && point[0] === 0x04) {
+      const x = point.slice(1, 33);
+      const y = point.slice(33, 65);
+      return {
+        x: SecretsManager.toBase64Url(x),
+        y: SecretsManager.toBase64Url(y),
+      };
+    }
+
+    if (point.length === 33 && (point[0] === 0x02 || point[0] === 0x03)) {
+      const xBytes = point.slice(1);
+      const x = SecretsManager.bytesToBigInt(xBytes);
+      const rhs = SecretsManager.modP(
+        SecretsManager.modPow(x, 3n) - 3n * x + SecretsManager.P256_B
+      );
+      const sqrt = SecretsManager.modSqrt(rhs);
+      if (sqrt === null) {
+        return null;
+      }
+
+      let y = sqrt;
+      const parity = BigInt(point[0] & 1);
+      if ((y & 1n) !== parity) {
+        y = SecretsManager.P256_PRIME - y;
+      }
+
+      const yBytes = SecretsManager.bigIntToBuffer(y, 32);
+      return {
+        x: SecretsManager.toBase64Url(xBytes),
+        y: SecretsManager.toBase64Url(yBytes),
+      };
+    }
+
+    return null;
+  }
+
+  private static modP(value: bigint): bigint {
+    const result = value % SecretsManager.P256_PRIME;
+    return result >= 0n ? result : result + SecretsManager.P256_PRIME;
+  }
+
+  private static modPow(base: bigint, exponent: bigint): bigint {
+    let result = 1n;
+    let b = SecretsManager.modP(base);
+    let e = exponent;
+    while (e > 0n) {
+      if (e & 1n) {
+        result = SecretsManager.modP(result * b);
+      }
+      b = SecretsManager.modP(b * b);
+      e >>= 1n;
+    }
+    return result;
+  }
+
+  private static modSqrt(value: bigint): bigint | null {
+    const n = SecretsManager.modP(value);
+    if (n === 0n) {
+      return 0n;
+    }
+
+    const legendre = SecretsManager.modPow(n, (SecretsManager.P256_PRIME - 1n) / 2n);
+    if (legendre === SecretsManager.P256_PRIME - 1n) {
+      return null;
+    }
+
+    return SecretsManager.modPow(n, (SecretsManager.P256_PRIME + 1n) / 4n);
+  }
+
+  private static bytesToBigInt(buffer: Buffer): bigint {
+    const hex = buffer.toString('hex');
+    return hex.length === 0 ? 0n : BigInt(`0x${hex}`);
+  }
+
+  private static bigIntToBuffer(value: bigint, length: number): Buffer {
+    const hex = value.toString(16).padStart(length * 2, '0');
+    return Buffer.from(hex, 'hex');
+  }
+
+  private static toBase64Url(buffer: Buffer): string {
+    return buffer
+      .toString('base64')
+      .replace(/=+$/u, '')
+      .replace(/\+/gu, '-')
+      .replace(/\//gu, '_');
   }
 
   private validateSecrets(secrets: TurnkeySecrets): void {

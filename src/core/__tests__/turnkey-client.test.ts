@@ -774,4 +774,27 @@ describe('TurnkeyClientManager', () => {
       );
     });
   });
+
+  describe('isInitialized', () => {
+    beforeEach(() => {
+      TurnkeyClientManager.reset();
+    });
+
+    it('should return false when manager is not initialized', () => {
+      expect(TurnkeyClientManager.isInitialized()).toBe(false);
+    });
+
+    it('should return true after successful initialization', async () => {
+      await TurnkeyClientManager.initialize(runtimeConfig);
+      expect(TurnkeyClientManager.isInitialized()).toBe(true);
+    });
+
+    it('should return false after reset', async () => {
+      await TurnkeyClientManager.initialize(runtimeConfig);
+      expect(TurnkeyClientManager.isInitialized()).toBe(true);
+      
+      TurnkeyClientManager.reset();
+      expect(TurnkeyClientManager.isInitialized()).toBe(false);
+    });
+  });
 });

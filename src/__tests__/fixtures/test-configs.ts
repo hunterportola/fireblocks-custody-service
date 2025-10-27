@@ -19,7 +19,7 @@ interface BuildConfigOptions {
   environment?: PlatformEnvironment;
   organizationId?: string;
   metadata?: Record<string, unknown>;
-  partners?: Partial<PartnerConfiguration>[];
+  partners?: Partial<PartnerConfiguration>[] | undefined;
   policies?: Partial<PolicyTemplate>[];
   walletTemplates?: Partial<WalletTemplate>[];
   automationTemplates?: Partial<AutomationUserTemplate>[];
@@ -37,7 +37,7 @@ export function buildOriginatorConfig(options: BuildConfigOptions = {}): Origina
     environment = 'production' as const,
     organizationId = 'org-test-123',
     metadata,
-    partners = [],
+    partners,
     policies = [],
     walletTemplates = [],
     automationTemplates = [],
@@ -82,16 +82,9 @@ export function buildOriginatorConfig(options: BuildConfigOptions = {}): Origina
       ];
 
   // Default partners if none provided
-  const defaultPartners: PartnerConfiguration[] = partners.length > 0
-    ? partners.map(p => ({
-        partnerId: p.partnerId ?? 'LP001',
-        displayName: p.displayName ?? 'Test Partner',
-        enabled: p.enabled !== false,
-        flowOverrides: p.flowOverrides ?? {},
-        metadata: p.metadata,
-        ...p,
-      } as PartnerConfiguration))
-    : [
+  // Note: If partners is explicitly passed as empty array, respect that
+  const defaultPartners: PartnerConfiguration[] = partners === undefined
+    ? [
         {
           partnerId: 'LP001',
           displayName: 'Lending Partner One',
@@ -102,7 +95,15 @@ export function buildOriginatorConfig(options: BuildConfigOptions = {}): Origina
           displayName: 'Lending Partner Two',
           enabled: true,
         },
-      ];
+      ]
+    : partners.map(p => ({
+        partnerId: p.partnerId ?? 'LP001',
+        displayName: p.displayName ?? 'Test Partner',
+        enabled: p.enabled !== false,
+        flowOverrides: p.flowOverrides ?? {},
+        metadata: p.metadata,
+        ...p,
+      } as PartnerConfiguration));
 
   // Default policies if none provided
   const defaultPolicies: PolicyTemplate[] = policies.length > 0

@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: custody-postgres
+    environment:
+      POSTGRES_USER: custody
+      POSTGRES_PASSWORD: custody_secret_2024
+      POSTGRES_DB: custody_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U custody -d custody_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - custody-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: custody-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database configuration
+      DATABASE_URL: postgresql://custody:custody_secret_2024@postgres:5432/custody_service
+      
+      # Application configuration
+      NODE_ENV: development
+      PORT: 3000
+      
+      # Turnkey configuration (will be replaced with real values)
+      TURNKEY_API_PRIVATE_KEY: ${TURNKEY_API_PRIVATE_KEY:-}
+      TURNKEY_API_PUBLIC_KEY: ${TURNKEY_API_PUBLIC_KEY:-}
+      TURNKEY_API_KEY_ID: ${TURNKEY_API_KEY_ID:-}
+      TURNKEY_ORGANIZATION_ID: ${TURNKEY_ORGANIZATION_ID:-}
+      
+      # RPC endpoints for testnet
+      ETH_RPC_URL: ${ETH_RPC_URL:-https://eth-sepolia.g.alchemy.com/v2/demo}
+      SEPOLIA_RPC_URL: ${SEPOLIA_RPC_URL:-https://eth-sepolia.g.alchemy.com/v2/FMX-Ig07NkgHO7V5RHuJ9}
+      ARBITRUM_RPC_URL: ${ARBITRUM_RPC_URL:-https://arb-sepolia.g.alchemy.com/v2/demo}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src
+      - ./test-data:/app/test-data
+      - /app/node_modules
+    networks:
+      - custody-network
+    command: npm run dev
+
+  # Optional: pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: custody-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@custody.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - custody-network
+    profiles:
+      - debug
+
+volumes:
+  postgres_data:
+
+networks:
+  custody-network:
+    driver: bridge

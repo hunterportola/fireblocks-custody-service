@@ -1,0 +1,81 @@
+[
+  {
+    "originatorId": "originator_acme_lending",
+    "displayName": "ACME Lending Corp.",
+    "provisioning": {
+      "subOrganizationId": "sub_org_originator_acme_lending_1761521069201",
+      "apiKeys": [
+        {
+          "lenderId": "lender_originator_acme_lending_primary",
+          "apiKey": "originator_acme_lending_api_key_5u55s56j9n8",
+          "permissions": [
+            "disbursements:create",
+            "disbursements:read",
+            "wallets:read",
+            "lenders:read",
+            "lenders:update"
+          ]
+        },
+        {
+          "lenderId": "lender_originator_acme_lending_secondary",
+          "apiKey": "originator_acme_lending_api_key_j6sr17au72d",
+          "permissions": [
+            "disbursements:read",
+            "wallets:read",
+            "lenders:read"
+          ]
+        }
+      ],
+      "wallets": {
+        "distribution": {
+          "walletId": "wallet_dist_le4hyikpxrk",
+          "accountId": "account_dbwlr449169",
+          "address": "0x601cfd4d91adb8"
+        },
+        "collection": {
+          "walletId": "wallet_coll_m9s5b9ihg4s",
+          "accountId": "account_m18rzfikoao",
+          "address": "0xc54e798f3d7288"
+        }
+      },
+      "provisionedAt": "2025-10-26T23:24:29.200Z"
+    }
+  },
+  {
+    "originatorId": "originator_stellar_loans",
+    "displayName": "Stellar Loans Inc.",
+    "provisioning": {
+      "subOrganizationId": "sub_org_originator_stellar_loans_1761521069201",
+      "apiKeys": [
+        {
+          "lenderId": "lender_originator_stellar_loans_primary",
+          "apiKey": "originator_stellar_loans_api_key_ue162vf99l9",
+          "permissions": [
+            "disbursements:create",
+            "disbursements:read",
+            "wallets:read",
+            "lenders:read",
+            "lenders:update"
+          ]
+        },
+        {
+          "lenderId": "lender_originator_stellar_loans_secondary",
+          "apiKey": "originator_stellar_loans_api_key_76cxhjcsot9",
+          "permissions": [
+            "disbursements:read",
+            "wallets:read",
+            "lenders:read"
+          ]
+        }
+      ],
+      "wallets": {
+        "distribution": {
+          "walletId": "wallet_dist_boi406o749",
+          "accountId": "account_5hjytrfdaxr",
+          "address": "0x17ed26c7ce0a68"
+        }
+      },
+      "provisionedAt": "2025-10-26T23:24:29.201Z"
+    }
+  }
+]

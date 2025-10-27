@@ -19,10 +19,5 @@ export {
 } from './provisioner/runtime-snapshots';
 export type { PartnerRuntimeConfig as ProvisionedPartnerRuntimeConfig } from './provisioner/runtime-snapshots';
 export * from './provisioner/policy-binding-resolver';
-
-export class TurnkeyCustodyService {
-  // TODO: implement orchestration logic in subsequent iterations
-  constructor(config: unknown) {
-    void config;
-  }
-}
+export * from './services/turnkey-custody-service';
+export * from './services/turnkey-disbursement-executor';

@@ -88,7 +88,7 @@ describe('SecretsManager', () => {
       const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid private key format: must be PEM format or base64-encoded PEM'
+        'Invalid private key format: must be PEM, base64-encoded PEM, or Turnkey hex'
       );
     });
 
@@ -100,7 +100,7 @@ describe('SecretsManager', () => {
       const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid public key format: must be PEM format or base64-encoded PEM'
+        'Invalid public key format: must be PEM, base64-encoded PEM, or Turnkey hex'
       );
     });
   });
@@ -148,7 +148,7 @@ describe('SecretsManager', () => {
       const manager = SecretsManager.getInstance(envConfig);
 
       await expect(manager.loadSecrets()).rejects.toThrow(
-        'Invalid private key format: must be PEM format or base64-encoded PEM'
+        'Invalid private key format: must be PEM, base64-encoded PEM, or Turnkey hex'
       );
 
       expect(() => manager.getSecrets()).toThrow('Secrets not loaded. Call loadSecrets() first');

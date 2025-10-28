@@ -215,7 +215,7 @@ INSERT INTO wallets (originator_id, turnkey_wallet_id, turnkey_suborg_id, templa
 ('originator_acme_lending', 'wallet_acme_reserve_001', 'suborg_acme_67890', 'acme_reserve', 'ACME Reserve Wallet 2024-01-15', 'reserve');
 
 -- Insert wallet accounts
-INSERT INTO wallet_accounts (wallet_id, turnkey_account_id, alias, address, curve, path_format, path, address_format, chain, balance) 
+INSERT INTO wallet_accounts (wallet_id, turnkey_account_id, alias, address, curve, path_format, path, address_format, chain) 
 SELECT 
   w.id,
   w.turnkey_wallet_id || '_acct_' || a.alias,
@@ -228,12 +228,7 @@ SELECT
   a.account->>'pathFormat',
   a.account->>'path',
   a.account->>'addressFormat',
-  'sepolia',
-  CASE 
-    WHEN w.flow_id = 'distribution' THEN 1000000.00
-    WHEN w.flow_id = 'collection' THEN 50000.00
-    ELSE 100000.00
-  END
+  'sepolia'
 FROM wallets w
 CROSS JOIN LATERAL (
   SELECT jsonb_array_elements(wt.accounts_template) AS account, 
@@ -337,7 +332,7 @@ SELECT
   'loan_' || substr(md5(random()::text), 1, 8),
   '0x' || substr(md5(random()::text), 1, 40),
   (random() * 100000 + 1000)::decimal(36, 18),
-  'sepolia'::blockchain,
+  'sepolia'::transaction_chain,
   w.id,
   wa.id,
   CASE 
@@ -507,19 +502,6 @@ INSERT INTO provisioning_snapshots (
   ),
   (SELECT array_agg(turnkey_policy_id) FROM policies WHERE originator_id = 'originator_acme_lending'),
   '2024-01-15T10:00:00Z'
-);
-
--- Update wallet balances based on completed transactions
-UPDATE wallet_accounts wa
-SET balance = balance - COALESCE((
-  SELECT SUM(d.amount)
-  FROM disbursements d
-  WHERE d.account_id = wa.id
-    AND d.status = 'completed'
-), 0),
-balance_updated_at = NOW()
-WHERE EXISTS (
-  SELECT 1 FROM disbursements d WHERE d.account_id = wa.id
 );
 
 -- Insert some audit logs

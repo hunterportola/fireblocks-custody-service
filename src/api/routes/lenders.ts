@@ -1,26 +1,50 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { requirePermission } from '../middleware/lender-auth';
+import { requirePermission } from '../middleware/tenant-auth';
+import { DisbursementError } from '../middleware/error-handler';
 
 const router = Router();
 
-// Get current lender information
+const assertTenantContext = (req: Request) => {
+  if (!req.tenant || !req.user) {
+    throw new DisbursementError(
+      'AUTH_CONTEXT_MISSING',
+      'Tenant authentication context is required to access originator routes',
+      500
+    );
+  }
+
+  return {
+    tenant: req.tenant,
+    user: req.user,
+    originatorId: req.tenant.originatorId,
+  };
+};
+
+const deriveDisplayName = (identifier: string): string =>
+  identifier
+    .replace(/^lender_/, '')
+    .replace(/^originator_/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+// Get current originator information
 router.get(
   '/me',
   requirePermission('lenders:read'),
   (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const lender = req.lender;
+      const { tenant, originatorId } = assertTenantContext(req);
 
-      // TODO: Fetch real lender data from database and Turnkey
-      const lenderInfo = {
-        lenderId: lender.lenderId,
-        displayName: lender.lenderId.replace('lender_', '').replace('_', ' ').toUpperCase(),
-        status: 'active', // provisioning | active | suspended
-        turnkeySubOrgId: lender.turnkeySubOrgId,
+      const originatorInfo = {
+        originatorId,
+        displayName: deriveDisplayName(originatorId),
+        status: tenant.status,
+        turnkeySubOrgId: tenant.turnkeySubOrgId,
         wallets: {
           distribution: {
-            walletId: 'wallet_dist_' + lender.lenderId.split('_')[1],
+            walletId: `wallet_${originatorId}_distribution`,
             addresses: {
               sepolia: '0x742d35Cc6734C0532925a3b8D6749E58e74DBe3A',
             },
@@ -35,13 +59,13 @@ router.get(
           maxDailyAmount: '500000.00',
           maxSingleTransaction: '100000.00',
         },
-        createdAt: '2024-01-15T10:00:00Z',
-        permissions: lender.permissions,
+        createdAt: '2024-01-15T10:00:00Z', // Mock data until real data wiring is implemented
+        permissions: req.user?.permissions ?? [],
       };
 
-      console.log(`ℹ️ [${req.context.requestId}] Retrieved lender info for: ${lender.lenderId}`);
-      
-      res.json(lenderInfo);
+      console.log(`ℹ️ [${req.context.requestId}] Retrieved originator info for: ${originatorId}`);
+
+      res.json(originatorInfo);
     } catch (error) {
       next(error);
     }
@@ -54,14 +78,13 @@ router.get(
   requirePermission('wallets:read'),
   (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const lender = req.lender;
+      const { originatorId } = assertTenantContext(req);
 
-      // TODO: Fetch real balance data from blockchain
       const walletBalances = {
-        lenderId: lender.lenderId,
+        originatorId,
         wallets: {
           distribution: {
-            walletId: 'wallet_dist_' + lender.lenderId.split('_')[1],
+            walletId: `wallet_${originatorId}_distribution`,
             balances: {
               sepolia: {
                 USDC: '50000.00',
@@ -77,8 +100,8 @@ router.get(
         lastUpdated: new Date().toISOString(),
       };
 
-      console.log(`💰 [${req.context.requestId}] Retrieved wallet balances for: ${lender.lenderId}`);
-      
+      console.log(`💰 [${req.context.requestId}] Retrieved wallet balances for originator: ${originatorId}`);
+
       res.json(walletBalances);
     } catch (error) {
       next(error);
@@ -86,7 +109,7 @@ router.get(
   }
 );
 
-// Update lender configuration (for future use)
+// Update originator configuration (placeholder)
 router.patch(
   '/me',
   requirePermission('lenders:update'),
@@ -114,20 +137,17 @@ router.patch(
         return;
       }
 
-      const lender = req.lender;
+      const { originatorId } = assertTenantContext(req);
       const body: unknown = req.body;
       const updates: Record<string, unknown> =
         typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
 
-      console.log(`🔧 [${req.context.requestId}] Updating lender config for: ${lender.lenderId}`, updates);
-
-      // TODO: Implement actual lender configuration updates
-      // This would involve updating Turnkey policies and database records
+      console.log(`🔧 [${req.context.requestId}] Updating originator config for: ${originatorId}`, updates);
 
       res.json({
-        message: 'Lender configuration updated successfully',
-        lenderId: lender.lenderId,
-        updates: updates,
+        message: 'Configuration update accepted (pending implementation)',
+        originatorId,
+        updates,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

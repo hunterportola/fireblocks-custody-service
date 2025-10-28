@@ -30,6 +30,7 @@ export interface ProvisionedWalletFlow {
   flowId: WalletFlowId;
   walletTemplateId: string;
   walletId: string;
+  walletName: string;
   /**
    * Map of account alias -> Turnkey account ID.
    */
@@ -53,6 +54,8 @@ export interface ProvisionedAutomationUser {
   apiKeyId?: string;
   apiKeyIds?: ReadonlyArray<string>;
   apiKeyPublicKey?: string;
+  partnerId?: PartnerId;
+  credentialKey?: string;
   /**
    * When the automation key was last rotated. Used to invalidate cached clients.
    */
@@ -96,6 +99,10 @@ export interface PartnerRuntimeConfig {
    * Automation user template applied to this partner, if any.
    */
   automationUserTemplateId?: string;
+  /**
+   * Automation user identifiers that belong to this partner.
+   */
+  automationUserIds?: ReadonlyArray<string>;
   /**
    * Partner specific webhook resolved during provisioning.
    */

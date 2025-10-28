@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 /**
- * Script to provision test originators for MVP testing
+ * Script to provision test originators for workflow testing
  * 
  * This creates test originators with mock Turnkey provisioning
  * and outputs API keys and configuration for testing.
@@ -313,7 +313,7 @@ function generateMockProvisioningResult(config: OriginatorConfiguration): {
 }
 
 async function main(): Promise<void> {
-  console.warn('🚀 Provisioning test originators for MVP testing...\n');
+  console.warn('🚀 Provisioning test originators for workflow testing...\n');
 
   interface ProvisioningResultRecord {
     originatorId: string;
@@ -378,35 +378,9 @@ async function main(): Promise<void> {
     JSON.stringify(results, null, 2)
   );
 
-  // Save lender auth configuration
-  await fs.writeFile(
-    path.join(outputDir, 'lender-auth-config.json'),
-    JSON.stringify(lenderAuthConfig, null, 2)
-  );
-
-  // Generate TypeScript code for updating lender-auth.ts
-  const lenderAuthCode = `
-// Add these to MOCK_LENDERS in src/api/middleware/lender-auth.ts
-const ADDITIONAL_TEST_LENDERS: Record<string, LenderInfo> = {
-${lenderAuthConfig.map((config) => `  '${config.apiKey}': {
-    lenderId: '${config.lenderInfo.lenderId}',
-    apiKeyId: '${config.lenderInfo.apiKeyId}',
-    permissions: ${JSON.stringify(config.lenderInfo.permissions)},
-    turnkeySubOrgId: '${config.lenderInfo.turnkeySubOrgId}',
-  }`).join(',\n')}
-};
-`;
-
-  await fs.writeFile(
-    path.join(outputDir, 'lender-auth-update.ts'),
-    lenderAuthCode
-  );
-
   console.warn('\n✨ Test originator provisioning complete!');
   console.warn('\n📁 Output files created:');
   console.warn(`   - ${path.join(outputDir, 'provisioning-results.json')}`);
-  console.warn(`   - ${path.join(outputDir, 'lender-auth-config.json')}`);
-  console.warn(`   - ${path.join(outputDir, 'lender-auth-update.ts')}`);
 
   console.warn('\n🔐 Generated API Keys:');
   lenderAuthConfig.forEach((config) => {
@@ -414,7 +388,7 @@ ${lenderAuthConfig.map((config) => `  '${config.apiKey}': {
   });
 
   console.warn('\n📝 Next steps:');
-  console.warn('1. Copy the content from test-data/lender-auth-update.ts to src/api/middleware/lender-auth.ts');
+  console.warn('1. Insert these API keys into the control-plane database via ControlPlaneService.');
   console.warn('2. Start the API server: npm run start:dev');
   console.warn('3. Test with the generated API keys');
 }

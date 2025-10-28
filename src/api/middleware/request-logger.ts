@@ -4,7 +4,10 @@ import { randomUUID } from 'crypto';
 export interface RequestContext {
   requestId: string;
   startTime: number;
-  lenderId?: string;
+  originatorId?: string;
+  tenantDisplayName?: string;
+  userId?: string;
+  userType?: string;
 }
 
 declare module 'express-serve-static-core' {
@@ -31,6 +34,18 @@ const normalizeContentLength = (value: HeaderValue): number => {
 
 const logRequestEvent = (message: string, metadata: Record<string, unknown>): void => {
   console.warn(message, metadata);
+};
+
+export const logInfo = (message: string, metadata?: Record<string, unknown>): void => {
+  console.log(message, metadata || {});
+};
+
+export const logWarn = (message: string, metadata?: Record<string, unknown>): void => {
+  console.warn(message, metadata || {});
+};
+
+export const logError = (message: string, metadata?: Record<string, unknown>): void => {
+  console.error(message, metadata || {});
 };
 
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {

@@ -18,6 +18,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "ci": "npm run lint && npm run test && npm run typecheck",
+    "init-control-plane": "npx tsx scripts/init-control-plane.ts",
+    "test-tenant-provisioning": "npx tsx scripts/test-tenant-provisioning.ts",
     "example:setup": "echo 'Use Turnkey CLI examples instead'"
   },
   "keywords": [
@@ -66,6 +68,7 @@
     "prettier": "^3.6.2",
     "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.2"
   },

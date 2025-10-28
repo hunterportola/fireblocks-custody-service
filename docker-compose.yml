@@ -32,6 +32,7 @@ services:
     environment:
       # Database configuration
       DATABASE_URL: postgresql://custody:custody_secret_2024@postgres:5432/custody_service
+      TENANT_DB_ENCRYPTION_KEY: ${TENANT_DB_ENCRYPTION_KEY:-4f7c9f9d2b2f4d8c9e3a6b1c7d5e8f0a4c6d2e3f5a7b9c1d3e5f7a9b1c3d5f7a}
       
       # Application configuration
       NODE_ENV: development

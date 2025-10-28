@@ -13,8 +13,12 @@ const mockClient = {
   provisionSubOrganization: jest.fn(),
   bootstrapAutomation: jest.fn(),
   provisionWalletForTemplate: jest.fn(),
+  provisionAutomationUser: jest.fn(),
 } as jest.Mocked<
-  Pick<TurnkeyClientManager, 'provisionSubOrganization' | 'bootstrapAutomation' | 'provisionWalletForTemplate'>
+  Pick<
+    TurnkeyClientManager,
+    'provisionSubOrganization' | 'bootstrapAutomation' | 'provisionWalletForTemplate' | 'provisionAutomationUser'
+  >
 >;
 
 const mockPolicyProvisioner = {
@@ -64,6 +68,7 @@ function buildConfig(): OriginatorConfiguration {
             flowOverrides: {
               distribution: 'wallet-partner-distribution',
             },
+            automationUserTemplateId: 'auto-partner',
           },
         ],
         defaultPolicyIds: [],
@@ -172,11 +177,13 @@ describe('TurnkeySuborgProvisioner', () => {
       wallets: {
         distribution: {
           walletId: 'wallet-default-dist',
+          walletName: 'DIST-orig-001',
           accountIds: ['account-default-dist'],
           accountAddresses: ['0xdefaultdist'],
         },
         collection: {
           walletId: 'wallet-default-coll',
+          walletName: 'COLL-orig-001',
           accountIds: ['account-default-coll'],
           accountAddresses: ['0xdefaultcoll'],
         },
@@ -189,17 +196,29 @@ describe('TurnkeySuborgProvisioner', () => {
           templateId: 'auto-default',
           userId: 'usr-auto-default',
           apiKeyIds: ['key-auto-default'],
-        },
-        {
-          templateId: 'auto-partner',
-          userId: 'usr-auto-partner',
-          apiKeyIds: ['key-auto-partner'],
+          credentials: {
+            apiPrivateKey: 'priv-default',
+            apiPublicKey: 'pub-default',
+            apiKeyId: 'key-auto-default',
+          },
         },
       ],
     });
 
+    mockClient.provisionAutomationUser.mockResolvedValue({
+      templateId: 'auto-partner',
+      userId: 'usr-auto-partner-LP002',
+      apiKeyIds: ['key-auto-partner'],
+      credentials: {
+        apiPrivateKey: 'priv-partner',
+        apiPublicKey: 'pub-partner',
+        apiKeyId: 'key-auto-partner',
+      },
+    });
+
     mockClient.provisionWalletForTemplate.mockResolvedValue({
       walletId: 'wallet-override-dist',
+      walletName: 'P-DIST-LP002',
       accountIds: ['account-override-dist'],
       accountAddresses: ['0xoverride'],
     });
@@ -262,10 +281,50 @@ describe('TurnkeySuborgProvisioner', () => {
       collection: 'wallet-default-coll',
     });
 
+    expect(partnerOverride?.automationUserIds).toEqual(['usr-auto-partner-LP002']);
+
     const partnerDefault = result.provisioningSnapshot.partners.find((p) => p.partnerId === 'LP001');
     expect(partnerDefault?.walletFlows).toMatchObject({
       distribution: 'wallet-default-dist',
       collection: 'wallet-default-coll',
     });
+
+    expect(result.provisioningSnapshot.walletFlows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          walletId: 'wallet-default-dist',
+          walletName: expect.any(String),
+        }),
+      ])
+    );
+
+    expect(result.provisioningSnapshot.automationUsers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          templateId: 'auto-default',
+          userId: 'usr-auto-default',
+          credentialKey: 'auto-default',
+        }),
+        expect.objectContaining({
+          templateId: 'auto-partner',
+          userId: 'usr-auto-partner-LP002',
+          partnerId: 'LP002',
+          credentialKey: 'LP002::auto-partner',
+        }),
+      ])
+    );
+
+    expect(result.automationCredentials).toEqual(
+      expect.objectContaining({
+        'auto-default': expect.objectContaining({ apiPrivateKey: 'priv-default' }),
+        'LP002::auto-partner': expect.objectContaining({ apiPrivateKey: 'priv-partner' }),
+      })
+    );
+
+    expect(mockClient.provisionAutomationUser).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: 'auto-partner' }),
+      expect.objectContaining({ partnerId: 'LP002' }),
+      'sub-org-001'
+    );
   });
 });

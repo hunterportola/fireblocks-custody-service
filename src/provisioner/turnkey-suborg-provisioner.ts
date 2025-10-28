@@ -82,22 +82,21 @@ export class TurnkeySuborgProvisioner {
       runtimeContext,
       provisionResult.subOrgId
     );
-    const automationUsers = this.mapAutomationUsers(automationResult.automationUsers);
+    const automationCredentialMap: Record<string, AutomationKeyCredentials> = {};
+    const automationUsers = automationResult.automationUsers.map((user) => {
+      const credentialKey = this.buildCredentialKey(user.templateId);
+      if (user.credentials) {
+        automationCredentialMap[credentialKey] = user.credentials;
+      }
+      return this.mapAutomationUser(user, { credentialKey });
+    });
     const automationUserIdMap = automationUsers.reduce<Record<string, string>>((acc, user) => {
       if (user.userId && user.userId !== 'pending') {
         acc[user.templateId] = user.userId;
       }
       return acc;
     }, {});
-    const automationCredentials = automationResult.automationUsers.reduce<Record<string, AutomationKeyCredentials>>(
-      (acc, user) => {
-        if (user.credentials) {
-          acc[user.templateId] = user.credentials;
-        }
-        return acc;
-      },
-      {}
-    );
+    const partnerAutomationUserIds = new Map<string, string[]>();
 
     const defaultWalletFlows = this.buildWalletFlowSnapshots(
       config.businessModel.wallets,
@@ -148,6 +147,36 @@ export class TurnkeySuborgProvisioner {
         overrideWalletMap.set(overrideKey, overrideSnapshot);
         overrideWalletFlows.push(overrideSnapshot);
       }
+
+      if (plan.automationUserTemplate) {
+        const partnerContext: TemplateContext = {
+          ...runtimeContext,
+          partnerId: plan.partner.partnerId,
+          partnerDisplayName: plan.partner.displayName,
+        };
+
+        const partnerAutomation = await this.client.provisionAutomationUser(
+          plan.automationUserTemplate,
+          partnerContext,
+          provisionResult.subOrgId
+        );
+
+        const credentialKey = this.buildCredentialKey(plan.automationUserTemplate.templateId, plan.partner.partnerId);
+        if (partnerAutomation.credentials) {
+          automationCredentialMap[credentialKey] = partnerAutomation.credentials;
+        }
+
+        const mappedAutomationUser = this.mapAutomationUser(partnerAutomation, {
+          partnerId: plan.partner.partnerId,
+          credentialKey,
+        });
+        automationUsers.push(mappedAutomationUser);
+
+        if (!partnerAutomationUserIds.has(plan.partner.partnerId)) {
+          partnerAutomationUserIds.set(plan.partner.partnerId, []);
+        }
+        partnerAutomationUserIds.get(plan.partner.partnerId)?.push(mappedAutomationUser.userId);
+      }
     }
 
     const walletFlows = [...defaultWalletFlows, ...overrideWalletFlows];
@@ -196,7 +225,8 @@ export class TurnkeySuborgProvisioner {
       partnerPlans,
       policyOutput.partnerPolicies,
       defaultWalletMap,
-      overrideWalletMap
+      overrideWalletMap,
+      partnerAutomationUserIds
     );
 
     const provisioningSnapshot: ProvisioningRuntimeSnapshot = {
@@ -224,7 +254,7 @@ export class TurnkeySuborgProvisioner {
       resolvedTemplates: {
         [config.provisioning.nameTemplate]: provisioningSnapshot.name,
       },
-      automationCredentials: Object.keys(automationCredentials).length ? automationCredentials : undefined,
+      automationCredentials: Object.keys(automationCredentialMap).length ? automationCredentialMap : undefined,
     };
   }
 
@@ -292,10 +322,7 @@ export class TurnkeySuborgProvisioner {
       return undefined;
     }
 
-    const candidateTemplateId =
-      partner.automationUserTemplateId ??
-      config.provisioning.defaultAutomationTemplateId ??
-      config.accessControl.automation?.defaultTemplateId;
+    const candidateTemplateId = partner.automationUserTemplateId;
 
     if (candidateTemplateId == null) {
       return undefined;
@@ -320,24 +347,30 @@ export class TurnkeySuborgProvisioner {
     }));
   }
 
-  private mapAutomationUsers(users: AutomationProvisionResult['automationUsers']): ProvisionedAutomationUser[] {
-    return users.map((user) => {
-      const apiKeyIds = user.apiKeyIds ?? (user.apiKeyId != null ? [user.apiKeyId] : undefined);
-      const primaryApiKeyId = apiKeyIds?.[0];
-      return {
-        templateId: user.templateId,
-        userId: user.userId,
-        apiKeyId: primaryApiKeyId,
-        apiKeyIds,
-        apiKeyPublicKey: user.credentials?.apiPublicKey,
-        sessionIds: user.sessionIds ?? [],
-      };
-    });
+  private mapAutomationUser(
+    user: AutomationProvisionResult['automationUsers'][number],
+    overrides?: { partnerId?: string; credentialKey?: string }
+  ): ProvisionedAutomationUser {
+    const apiKeyIds = user.apiKeyIds ?? (user.apiKeyId != null ? [user.apiKeyId] : undefined);
+    const primaryApiKeyId = apiKeyIds?.[0];
+    return {
+      templateId: user.templateId,
+      userId: user.userId,
+      apiKeyId: primaryApiKeyId,
+      apiKeyIds,
+      apiKeyPublicKey: user.credentials?.apiPublicKey,
+      sessionIds: user.sessionIds ?? [],
+      partnerId: overrides?.partnerId,
+      credentialKey: overrides?.credentialKey ?? this.buildCredentialKey(user.templateId, overrides?.partnerId),
+    };
   }
 
   private buildWalletFlowSnapshots(
     wallets: WalletArchitecture,
-    provisionedWallets: Record<WalletFlowId, { walletId: string; accountIds: string[]; accountAddresses: string[] }>
+    provisionedWallets: Record<
+      WalletFlowId,
+      { walletId: string; walletName: string; accountIds: string[]; accountAddresses: string[] }
+    >
   ): ProvisionedWalletFlow[] {
     return Object.entries(wallets.flows).map(([flowId, flowConfig]) => {
       const template = this.findWalletTemplate(wallets, flowConfig.templateId);
@@ -349,7 +382,7 @@ export class TurnkeySuborgProvisioner {
   private createProvisionedWalletFlow(
     flowId: WalletFlowId,
     template: WalletTemplate,
-    record?: { walletId?: string; accountIds?: string[]; accountAddresses?: string[] },
+    record?: { walletId?: string; walletName?: string; accountIds?: string[]; accountAddresses?: string[] },
     metadata?: Record<string, string>
   ): ProvisionedWalletFlow {
     const accountIdByAlias: Record<string, string> = {};
@@ -368,6 +401,7 @@ export class TurnkeySuborgProvisioner {
       flowId,
       walletTemplateId: template.templateId,
       walletId: record?.walletId ?? 'pending',
+      walletName: record?.walletName ?? template.walletNameTemplate,
       accountIdByAlias,
       accountAddressByAlias: Object.keys(accountAddressByAlias).length ? accountAddressByAlias : undefined,
       metadata,
@@ -378,7 +412,8 @@ export class TurnkeySuborgProvisioner {
     plans: PartnerProvisioningPlan[],
     partnerPolicyMap: Record<string, string[]>,
     defaultWalletMap: Map<WalletFlowId, ProvisionedWalletFlow>,
-    overrideWalletMap: Map<string, ProvisionedWalletFlow>
+    overrideWalletMap: Map<string, ProvisionedWalletFlow>,
+    partnerAutomationUserIds: Map<string, string[]>
   ): PartnerRuntimeConfig[] {
     return plans.map((plan) => {
       const walletAssignments: Record<WalletFlowId, string> = {};
@@ -398,10 +433,15 @@ export class TurnkeySuborgProvisioner {
         walletFlows: walletAssignments,
         policyIds: partnerPolicyMap[plan.partner.partnerId] ?? [],
         automationUserTemplateId: plan.automationUserTemplate?.templateId,
+        automationUserIds: partnerAutomationUserIds.get(plan.partner.partnerId) ?? [],
         webhookUrl: plan.partner.webhookOverride?.urlTemplate,
         metadata: plan.partner.metadata,
       };
     });
+  }
+
+  private buildCredentialKey(templateId: string, partnerId?: string): string {
+    return partnerId != null && partnerId.length > 0 ? `${partnerId}::${templateId}` : templateId;
   }
 
   private buildWalletAliasMap(

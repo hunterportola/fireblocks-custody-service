@@ -79,60 +79,54 @@ INSERT INTO originators (id, name, display_name, branding, settings, metadata) V
 -- Insert test API keys
 -- Note: These are hashed versions of the test keys. In production, use proper bcrypt/argon2
 -- Test keys:
--- originator_demo_api_key_abc789 -> SHA256: 8f4e3c2d1b0a9876543210fedcba
--- originator_acme_lending_api_key_5u55s56j9n8 -> SHA256: 7d3b2c1a0f9e8765432109876543
--- originator_stellar_loans_api_key_ue162vf99l9 -> SHA256: 6c2a1b0f9d8e7654321098765432
-INSERT INTO api_keys (key_hash, originator_id, name, permissions) VALUES
+-- originator_demo_api_key_abc789 -> SHA256: 374bfca5816aaa32ea329f870da80b52d9095090912699cb2fb19bc93b43abcb
+-- originator_acme_lending_api_key_5u55s56j9n8 -> SHA256: 95b3e59637912a7c8e622373d9e6f4fa491847a178148177d121e79728930739
+-- originator_stellar_loans_api_key_ue162vf99l9 -> SHA256: 10a385fab96d860c9e5f2a438907316b8c0d92cab3a61e1a9476d825164b16bb
+INSERT INTO api_keys (api_key_hash, originator_id, name, permissions) VALUES
 (
-  'sha256$8f4e3c2d1b0a9876543210fedcba$demo_key',
+  '374bfca5816aaa32ea329f870da80b52d9095090912699cb2fb19bc93b43abcb',
   'originator_demo',
   'Demo Test Key',
   '["disbursements:create", "disbursements:read", "wallets:read"]'
 ),
 (
-  'sha256$7d3b2c1a0f9e8765432109876543$acme_key',
+  '95b3e59637912a7c8e622373d9e6f4fa491847a178148177d121e79728930739',
   'originator_acme_lending',
   'ACME Primary Key',
   '["disbursements:create", "disbursements:read", "disbursements:retry", "wallets:read", "wallets:update"]'
 ),
 (
-  'sha256$6c2a1b0f9d8e7654321098765432$stellar_key',
+  '10a385fab96d860c9e5f2a438907316b8c0d92cab3a61e1a9476d825164b16bb',
   'originator_stellar_loans',
   'Stellar Primary Key',
   '["disbursements:create", "disbursements:read", "wallets:read"]'
 );
 
 -- Insert some test wallets
-INSERT INTO wallets (id, originator_id, turnkey_wallet_id, turnkey_suborg_id, flow_id, address, chain, balance) VALUES
+INSERT INTO wallets (originator_id, turnkey_wallet_id, turnkey_suborg_id, template_id, name, flow_id) VALUES
 (
-  'wallet_demo_dist_123',
   'originator_demo',
   'turnkey_wallet_demo_123',
   'sub_org_demo_67890',
-  'distribution',
-  '0x1234567890123456789012345678901234567890',
-  'ethereum',
-  100000.000000
+  'wallet-distribution-default',
+  'Demo Distribution Wallet',
+  'distribution'
 ),
 (
-  'wallet_acme_dist_eth',
   'originator_acme_lending',
   'turnkey_wallet_acme_eth_456',
   'sub_org_originator_acme_lending_1761521069201',
-  'distribution',
-  '0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa',
-  'ethereum',
-  500000.000000
+  'wallet-distribution-default',
+  'ACME Distribution Wallet',
+  'distribution'
 ),
 (
-  'wallet_stellar_dist_eth',
   'originator_stellar_loans',
   'turnkey_wallet_stellar_eth_789',
   'sub_org_originator_stellar_loans_1761521069202',
-  'distribution',
-  '0xbBbbbbBBBBbbbbBBbBbbbbBBbbBbbbbBbBbbBBbB',
-  'ethereum',
-  250000.000000
+  'wallet-distribution-default',
+  'Stellar Distribution Wallet',
+  'distribution'
 );
 
 -- Insert demo transaction history (last 30 days)
@@ -173,7 +167,7 @@ SELECT
   '0x' || substr(md5(random()::text), 1, 40),
   -- Random amount between 100 and 10000 USDC
   (random() * 9900 + 100)::decimal(36, 18),
-  'ethereum',
+  'sepolia',
   -- 85% completed, 10% failed, 5% pending
   CASE 
     WHEN random() < 0.85 THEN 'completed'::disbursement_status
@@ -207,14 +201,3 @@ INSERT INTO webhook_configs (originator_id, url, events, is_active) VALUES
   '["disbursement.created", "disbursement.completed", "disbursement.failed", "disbursement.pending_approval"]',
   true
 );
-
--- Update wallet balances based on completed transactions
-UPDATE wallets w
-SET balance = balance - COALESCE((
-  SELECT SUM(d.amount)
-  FROM disbursements d
-  WHERE d.originator_id = w.originator_id
-  AND d.chain = w.chain
-  AND d.status = 'completed'
-), 0)
-WHERE w.flow_id = 'distribution';

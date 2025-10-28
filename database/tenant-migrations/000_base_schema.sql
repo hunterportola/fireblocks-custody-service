@@ -1,6 +1,5 @@
--- Enable necessary extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Base tenant schema (must run before any ALTER statements)
+-- Extensions are created by provisioner with admin privileges
 
 -- Enum types
 CREATE TYPE disbursement_status AS ENUM (
@@ -23,7 +22,7 @@ CREATE TYPE user_role AS ENUM (
   'viewer'
 );
 
--- Originators table
+-- Originators table (base table required for ALTERs in later migrations)
 CREATE TABLE originators (
   id VARCHAR(255) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -127,40 +126,6 @@ CREATE INDEX idx_wallets_originator_id ON wallets(originator_id);
 CREATE INDEX idx_wallets_turnkey_wallet_id ON wallets(turnkey_wallet_id);
 CREATE INDEX idx_wallets_flow_id ON wallets(flow_id);
 
--- Wallet accounts table (individual accounts within wallets)
-CREATE TABLE wallet_accounts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
-  turnkey_account_id VARCHAR(255) NOT NULL UNIQUE,
-  alias VARCHAR(255) NOT NULL,
-  address VARCHAR(100),
-  curve VARCHAR(50) NOT NULL,
-  path_format VARCHAR(50) NOT NULL,
-  path VARCHAR(255) NOT NULL,
-  address_format VARCHAR(50) NOT NULL,
-  chain VARCHAR(50) NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  
-  UNIQUE(wallet_id, alias)
-);
-
--- Create indexes for wallet accounts queries
-CREATE INDEX idx_wallet_accounts_wallet_id ON wallet_accounts(wallet_id);
-CREATE INDEX idx_wallet_accounts_turnkey_account_id ON wallet_accounts(turnkey_account_id);
-CREATE INDEX idx_wallet_accounts_address ON wallet_accounts(address);
-CREATE INDEX idx_wallet_accounts_chain ON wallet_accounts(chain);
-
--- Provisioning snapshots table (replaces in-memory store)
-CREATE TABLE provisioning_snapshots (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  originator_id VARCHAR(255) NOT NULL UNIQUE REFERENCES originators(id) ON DELETE CASCADE,
-  platform_config_hash VARCHAR(64) NOT NULL,
-  snapshot_data JSONB NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Webhook configurations
 CREATE TABLE webhook_configs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -208,12 +173,6 @@ CREATE TRIGGER update_disbursements_updated_at BEFORE UPDATE ON disbursements
   FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 
 CREATE TRIGGER update_wallets_updated_at BEFORE UPDATE ON wallets
-  FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
-
-CREATE TRIGGER update_wallet_accounts_updated_at BEFORE UPDATE ON wallet_accounts
-  FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
-
-CREATE TRIGGER update_provisioning_snapshots_updated_at BEFORE UPDATE ON provisioning_snapshots
   FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 
 CREATE TRIGGER update_webhook_configs_updated_at BEFORE UPDATE ON webhook_configs

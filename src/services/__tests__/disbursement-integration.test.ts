@@ -6,24 +6,13 @@ import { TurnkeyServiceError, ErrorCodes } from '../../core/error-handler';
 // Mock the TurnkeyClientManager
 jest.mock('../../core/turnkey-client');
 
-// Mock the DatabaseService
-jest.mock('../database-service', () => ({
-  DatabaseService: {
-    getInstance: jest.fn().mockReturnValue({
-      saveDisbursement: jest.fn().mockResolvedValue(undefined),
-      getDisbursement: jest.fn().mockResolvedValue(null),
-      updateDisbursement: jest.fn().mockResolvedValue(undefined),
-    }),
-  },
-}));
-
 const baseDisbursementParams: DisbursementParams = {
   loanId: 'LOAN-001',
   borrowerAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f82b8d',
   amount: '100.50',
   assetType: 'USDC',
   chain: 'sepolia',
-  lenderId: 'LENDER-001',
+  originatorId: 'originator-001',
   turnkeySubOrgId: 'sub-org-123',
   metadata: {
     borrowerKycStatus: 'verified',
@@ -34,10 +23,16 @@ const baseDisbursementParams: DisbursementParams = {
 describe('Disbursement Integration Tests', () => {
   let disbursementService: DisbursementService;
   let mockTurnkeyManager: jest.Mocked<TurnkeyClientManager>;
+  const mockTenantDatabase = {
+    saveDisbursement: jest.fn().mockResolvedValue(undefined),
+    getDisbursement: jest.fn().mockResolvedValue(null),
+  };
   
   beforeEach(() => {
     // Reset mocks
     jest.clearAllMocks();
+    mockTenantDatabase.saveDisbursement.mockClear();
+    mockTenantDatabase.getDisbursement.mockClear();
     
     // Create mock instance
     mockTurnkeyManager = {
@@ -49,7 +44,7 @@ describe('Disbursement Integration Tests', () => {
     (TurnkeyClientManager.getInstance as jest.Mock).mockReturnValue(mockTurnkeyManager);
     
     // Create service instance
-    disbursementService = new DisbursementService();
+    disbursementService = new DisbursementService(mockTenantDatabase as any);
   });
 
   describe('Full Disbursement Flow', () => {
@@ -154,15 +149,14 @@ describe('Disbursement Integration Tests', () => {
     });
 
     it('should surface configuration errors for unsupported chains', async () => {
-      const invalidParams = {
-        ...baseDisbursementParams,
-        chain: 'unsupported-chain' as DisbursementParams['chain'],
-      };
+    const invalidParams = {
+      ...baseDisbursementParams,
+      chain: 'unsupported-chain' as any,
+    };
 
-      // Type narrowing requires a runtime escape hatch for this negative test
-      const result = await disbursementService.createDisbursement(invalidParams as any);
-      expect(result.status).toBe('failed');
-      expect(result.error?.code).toBe('DISBURSEMENT_FAILED');
+    await expect(disbursementService.createDisbursement(invalidParams)).rejects.toThrow(
+      /Unsupported chain configuration/
+    );
     });
   });
 
@@ -324,11 +318,9 @@ describe('Disbursement Integration Tests', () => {
       
       mockTurnkeyManager.getApiClient.mockReturnValue(mockApiClient as any);
 
-      const result = await disbursementService.createDisbursement(baseDisbursementParams);
-      
-      expect(result.status).toBe('failed');
-      expect(result.error?.code).toBe('DISBURSEMENT_FAILED');
-      expect(result.error?.message).toBe('Failed to retrieve wallet information for signing');
+      await expect(disbursementService.createDisbursement(baseDisbursementParams)).rejects.toThrow(
+        /Failed to retrieve wallet information/
+      );
     });
 
     it('should handle signing failures gracefully', async () => {
@@ -349,11 +341,9 @@ describe('Disbursement Integration Tests', () => {
         new Error('Network timeout')
       );
 
-      const result = await disbursementService.createDisbursement(baseDisbursementParams);
-      
-      expect(result.status).toBe('failed');
-      expect(result.error?.message).toBe('Failed to execute disbursement transaction');
-      expect(result.timeline?.signed).toBeUndefined();
+      await expect(disbursementService.createDisbursement(baseDisbursementParams)).rejects.toThrow(
+        /Failed to execute disbursement transaction/
+      );
     });
   });
 

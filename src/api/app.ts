@@ -49,8 +49,8 @@ async function startServer(): Promise<void> {
     console.log(`   Lender Info:  http://localhost:${serverConfig.port}/api/v1/lenders/me`);
     console.log(`   Disbursements: http://localhost:${serverConfig.port}/api/v1/disbursements`);
     console.log('');
-    console.log('🔑 Example API calls:');
-    console.log('   curl -H "Authorization: Bearer lender_acme_corp_api_key_xyz123" \\');
+    console.log('🔑 Example API call:');
+    console.log('   curl -H "Authorization: Bearer originator_acme_lending_api_key_5u55s56j9n8" \\');
     console.log(`        http://localhost:${serverConfig.port}/api/v1/lenders/me`);
     console.log('');
 

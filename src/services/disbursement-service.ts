@@ -10,10 +10,49 @@ import {
   PolicyViolationError,
   ConsensusRequiredError as ApiConsensusRequiredError,
 } from '../api/middleware/error-handler';
-import type { 
-  DisbursementContext, 
-  DisbursementExecutionResult 
-} from './turnkey-custody-service';
+// Local type definitions used while the disbursement service is decoupled
+interface DisbursementContext {
+  loanId: string;
+  borrowerAddress: string;
+  amount: string;
+  originatorId: string;
+  turnkeySubOrgId: string;
+  wallet: {
+    flow?: ProvisionedWalletFlow; // Use proper wallet flow type
+    flowId: string;
+    walletId: string;
+    walletTemplateId: string;
+    accountAlias: string;
+    accountId: string;
+    accountAddress: string;
+  };
+  request: {
+    originatorId: string;
+    partnerId: string;
+    loanId: string;
+    borrowerAddress: string;
+    amount: string;
+    assetSymbol: string;
+    chainId: string;
+    walletFlowId: string;
+    walletAccountAlias: string;
+    metadata?: Record<string, unknown>;
+  };
+  snapshot: ProvisioningRuntimeSnapshot; // Use proper snapshot type
+  partner?: Record<string, unknown>; // Partner configuration object
+  automation?: Record<string, unknown>; // Automation configuration object
+  policyIds?: string[];
+}
+
+// Internal execution result with extended statuses for mapping
+interface DisbursementExecutionResult {
+  loanId?: string;
+  status: DisbursementStatus | 'submitted' | 'consensus_required'; // Allow extended statuses for internal use
+  transactionHash?: string;
+  turnkeyActivityId?: string;
+  signedTransaction?: string;
+  error?: unknown;
+}
 import { SEPOLIA_USDC_ADDRESS } from './constants';
 import type {
   ProvisionedWalletFlow,
@@ -22,7 +61,7 @@ import type {
   ProvisionedAutomationUser,
   ProvisionedPolicyTemplate
 } from '../provisioner/runtime-snapshots';
-import { DatabaseService } from './database-service';
+import type { TenantDatabaseService } from './tenant-database-service';
 
 // Type definitions
 interface TokenMetadata {
@@ -75,54 +114,57 @@ export interface DisbursementParams {
   amount: string;
   assetType: 'USDC';
   chain: SupportedChain;
-  lenderId: string;
+  originatorId: string;
   turnkeySubOrgId: string;
   metadata?: Record<string, unknown>;
 }
 
-export interface DisbursementStatus {
-  disbursementId: string;
-  status: 'pending' | 'signing' | 'broadcasting' | 'completed' | 'failed' | 'pending_approval';
-  loanId: string;
-  amount: string;
-  borrowerAddress: string;
-  chain: string;
-  txHash?: string;
-  turnkeyActivityId?: string;
-  timeline?: {
-    initiated?: string;
-    policiesEvaluated?: string;
-    signed?: string;
-    broadcasted?: string;
-    confirmed?: string;
-  };
-  approvalUrl?: string;
-  error?: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
-  originatorId?: string;
-  turnkeySubOrgId?: string;
-  metadata?: Record<string, unknown>;
-}
+// Import the shared types instead of duplicating them
+import type { DisbursementStatus, DisbursementRecord } from '../core/database-types';
+
+// Export the record type with a clear name to avoid confusion with status union
+export type { DisbursementRecord } from '../core/database-types';
 
 export class DisbursementService {
-  private turnkeyManager: TurnkeyClientManager;
-  private databaseService: DatabaseService;
+  private turnkeyManager: TurnkeyClientManager | null = null;
+  private readonly databaseService: TenantDatabaseService;
 
-  constructor() {
-    this.turnkeyManager = TurnkeyClientManager.getInstance();
-    this.databaseService = DatabaseService.getInstance();
+  constructor(databaseService: TenantDatabaseService) {
+    this.databaseService = databaseService;
   }
 
-  async createDisbursement(params: DisbursementParams): Promise<DisbursementStatus> {
+  private getTurnkeyManager(): TurnkeyClientManager {
+    if (this.turnkeyManager) {
+      return this.turnkeyManager;
+    }
+
+    let manager: TurnkeyClientManager;
+    if (TurnkeyClientManager.isInitialized()) {
+      manager = TurnkeyClientManager.getInstance();
+    } else {
+      try {
+        manager = TurnkeyClientManager.getInstance();
+      } catch (error) {
+        throw new TurnkeyServiceError(
+          'Turnkey manager not initialized',
+          ErrorCodes.INVALID_CONFIG,
+          undefined,
+          error
+        );
+      }
+    }
+
+    this.turnkeyManager = manager;
+    return manager;
+  }
+
+  async createDisbursement(params: DisbursementParams): Promise<DisbursementRecord> {
     const disbursementId = this.generateDisbursementId();
-    const timeline: NonNullable<DisbursementStatus['timeline']> = {
+    const timeline: NonNullable<DisbursementRecord['timeline']> = {
       initiated: new Date().toISOString(),
     };
 
-    console.log(`💸 Starting disbursement ${disbursementId} for loan ${params.loanId}`);
+    console.warn(`💸 Starting disbursement ${disbursementId} for loan ${params.loanId}`);
 
     try {
       const chainDefinition = this.getChainDefinition(params.chain);
@@ -137,7 +179,7 @@ export class DisbursementService {
       timeline.signed = new Date().toISOString();
       timeline.broadcasted = new Date().toISOString();
 
-      console.log(
+      console.warn(
         `✅ Disbursement ${disbursementId} submitted with tx: ${executorResult.transactionHash ?? 'pending'}`
       );
 
@@ -169,17 +211,33 @@ export class DisbursementService {
         }
       }
 
+      timeline.failed = new Date().toISOString();
+
       const failureResponse = this.buildFailureResponse(disbursementId, params, timeline, error);
-      
-      // Save failed disbursement to database
-      await this.databaseService.saveDisbursement(failureResponse);
-      
-      return failureResponse;
+
+      try {
+        await this.databaseService.saveDisbursement(failureResponse);
+      } catch (persistError) {
+        console.error(`⚠️ Failed to persist failed disbursement ${disbursementId}:`, persistError);
+      }
+
+      if (turnkeyError instanceof TurnkeyServiceError) {
+        throw turnkeyError;
+      }
+
+      throw error instanceof Error
+        ? error
+        : new TurnkeyServiceError('Disbursement creation failed', ErrorCodes.API_ERROR, undefined, error);
     }
   }
 
-  getDisbursementStatus(disbursementId: string): Promise<DisbursementStatus | null> {
-    return this.databaseService.getDisbursement(disbursementId);
+  async getDisbursementStatus(disbursementId: string): Promise<DisbursementRecord | null> {
+    const record = await this.databaseService.getDisbursement(disbursementId);
+    if (record === null || record === undefined) {
+      return null;
+    }
+    // Return the properly typed record from the database service
+    return record;
   }
 
   private async executeTransaction(
@@ -210,14 +268,14 @@ export class DisbursementService {
       );
 
       // Sign transaction with Turnkey
-      const signResult = await this.turnkeyManager.signTransaction({
+      const signResult = await this.getTurnkeyManager().signTransaction({
         subOrganizationId: context.snapshot.subOrganizationId,
         signWith: context.wallet.accountId,
         unsignedTransaction: unsignedTx,
         transactionType: 'TRANSACTION_TYPE_ETHEREUM',
       });
 
-      // Mock broadcast for MVP
+      // Mock broadcast placeholder until on-chain integration is enabled
       const txHash = await this.broadcastTransaction(
         chain,
         signResult.signedTransaction
@@ -251,6 +309,7 @@ export class DisbursementService {
       flowId,
       walletTemplateId,
       walletId: walletDetails.walletId,
+      walletName: `${params.originatorId}_distribution_wallet`,
       accountIdByAlias: {
         primary: walletDetails.accountId,
       },
@@ -260,7 +319,7 @@ export class DisbursementService {
     };
 
     const partner = {
-      partnerId: params.lenderId,
+      partnerId: params.originatorId,
       walletFlows: { [flowId]: walletDetails.walletId },
       policyIds: [] as string[],
     };
@@ -275,14 +334,19 @@ export class DisbursementService {
       policies: [] as ProvisionedPolicyTemplate[],
       partners: [partner],
       metadata: {
-        originatorId: params.lenderId,
+        originatorId: params.originatorId,
       },
     };
 
     return {
+      loanId: params.loanId,
+      borrowerAddress: params.borrowerAddress,
+      amount: params.amount,
+      originatorId: params.originatorId,
+      turnkeySubOrgId: params.turnkeySubOrgId,
       request: {
-        originatorId: params.lenderId,
-        partnerId: params.lenderId,
+        originatorId: params.originatorId,
+        partnerId: params.originatorId,
         loanId: params.loanId,
         amount: params.amount,
         assetSymbol: params.assetType,
@@ -312,10 +376,10 @@ export class DisbursementService {
     disbursementId: string,
     params: DisbursementParams,
     result: DisbursementExecutionResult,
-    timeline: NonNullable<DisbursementStatus['timeline']>
-  ): DisbursementStatus {
+    timeline: NonNullable<DisbursementRecord['timeline']>
+  ): DisbursementRecord {
     // Map execution result status to disbursement status
-    let status: DisbursementStatus['status'];
+    let status: DisbursementStatus;
     switch (result.status) {
       case 'submitted':
         status = 'broadcasting';
@@ -333,33 +397,39 @@ export class DisbursementService {
         status = 'pending';
     }
 
+    const now = new Date();
     return {
       disbursementId,
       status,
       loanId: params.loanId,
       amount: params.amount,
+      assetType: params.assetType,
       borrowerAddress: params.borrowerAddress,
       chain: params.chain,
       txHash: result.transactionHash,
       turnkeyActivityId: result.turnkeyActivityId,
       timeline,
-      originatorId: params.lenderId, // TODO: Get actual originator from context
+      originatorId: params.originatorId,
       turnkeySubOrgId: params.turnkeySubOrgId,
       metadata: params.metadata,
+      createdAt: now,
+      updatedAt: now,
     };
   }
 
   private buildFailureResponse(
     disbursementId: string,
     params: DisbursementParams,
-    timeline: NonNullable<DisbursementStatus['timeline']>,
+    timeline: NonNullable<DisbursementRecord['timeline']>,
     error: unknown
-  ): DisbursementStatus {
+  ): DisbursementRecord {
+    const now = new Date();
     return {
       disbursementId,
       status: 'failed',
       loanId: params.loanId,
       amount: params.amount,
+      assetType: params.assetType,
       borrowerAddress: params.borrowerAddress,
       chain: params.chain,
       timeline,
@@ -368,9 +438,11 @@ export class DisbursementService {
         message: error instanceof Error ? error.message : 'Unknown error',
         details: error,
       },
-      originatorId: params.lenderId, // TODO: Get actual originator from context
+      originatorId: params.originatorId,
       turnkeySubOrgId: params.turnkeySubOrgId,
       metadata: params.metadata,
+      createdAt: now,
+      updatedAt: now,
     };
   }
 
@@ -392,7 +464,7 @@ export class DisbursementService {
 
   private async resolveWalletDetails(subOrgId: string, chain: string): Promise<WalletDetails> {
     try {
-      const apiClient = this.turnkeyManager.getApiClient({ subOrganizationId: subOrgId });
+      const apiClient = this.getTurnkeyManager().getApiClient({ subOrganizationId: subOrgId });
       const walletsResponse = await apiClient.getWallets({ organizationId: subOrgId });
 
       if (!Array.isArray(walletsResponse.wallets) || walletsResponse.wallets.length === 0) {
@@ -445,7 +517,7 @@ export class DisbursementService {
         );
       }
 
-      console.log(
+      console.warn(
         `🔑 Using wallet account ${account.walletAccountId} (${resolvedAddress}) for chain ${chain}`
       );
       return {
@@ -465,8 +537,7 @@ export class DisbursementService {
   }
 
   private getChainDefinition(chain: SupportedChain): ChainDefinition {
-    const definition = CHAIN_DEFINITIONS[chain];
-    if (definition === undefined) {
+    if (!(chain in CHAIN_DEFINITIONS)) {
       throw new TurnkeyServiceError(
         `Unsupported chain configuration: ${chain}`,
         ErrorCodes.INVALID_CONFIG,
@@ -474,7 +545,7 @@ export class DisbursementService {
         { chain }
       );
     }
-    return definition;
+    return CHAIN_DEFINITIONS[chain];
   }
 
   private assertAmountPrecision(amount: string, decimals: number): void {
@@ -522,7 +593,7 @@ export class DisbursementService {
       chainId: parseChainIdToBigInt(chainDefinition.chainId),
     });
 
-    console.log(`🔨 Constructed USDC transfer:`, {
+    console.warn(`🔨 Constructed USDC transfer:`, {
       from: normalizedFrom,
       to: normalizedToken,
       amount,
@@ -537,8 +608,8 @@ export class DisbursementService {
     chain: string,
     _signedTransaction: string
   ): Promise<string> {
-    // Mock transaction broadcasting for MVP
-    console.log(`📡 Broadcasting transaction to ${chain}...`);
+    // Mock transaction broadcasting until on-chain integration is enabled
+    console.warn(`📡 Broadcasting transaction to ${chain}...`);
     
     // Simulate network delay
     await new Promise<void>(resolve => setTimeout(resolve, 1000));
@@ -546,7 +617,7 @@ export class DisbursementService {
     // Generate mock transaction hash
     const txHash = `0x${randomBytes(32).toString('hex')}`;
     
-    console.log(`✅ Transaction broadcasted: ${txHash}`);
+    console.warn(`✅ Transaction broadcasted: ${txHash}`);
     return txHash;
   }
 

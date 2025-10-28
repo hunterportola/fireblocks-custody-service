@@ -72,6 +72,7 @@ interface WalletProvisionRecord {
   walletId: string;
   accountIds: string[];
   accountAddresses: string[];
+  walletName: string;
 }
 
 const encodeBase64Url = (value: string): string => {
@@ -748,70 +749,84 @@ export class TurnkeyClientManager {
         automationTemplateId: template.templateId,
         automationUserIndex: index,
       };
-      const existingCredentials = this.secretsManager.getAutomationCredentials(template.templateId);
-      const apiKeys = this.resolveAutomationApiKeys(template, userContext, existingCredentials);
-      if (apiKeys.length === 0) {
-        throw new TurnkeyServiceError(
-          `Automation template "${template.templateId}" is missing API key material; provide apiKeys or pre-load TURNKEY_AUTOMATION_KEYS`,
-          ErrorCodes.INVALID_CONFIG
-        );
-      }
-      const authenticatorSeeds = this.filterAutomationAuthenticators(template.authenticators);
-      const authenticators = this.mapRootUserAuthenticators(authenticatorSeeds, userContext, template.templateId);
-      const oauthProviders = this.mapRootUserOauthProviders(template.oauthProviders);
-      const userTags = this.mapAutomationUserTags(template.userTags, userContext);
-
-      const timestampMs = Date.now().toString();
-      const payload = {
-        timestampMs,
-        type: 'ACTIVITY_TYPE_CREATE_USERS_V3',
-        parameters: {
-          users: [
-            {
-              userName: this.renderTemplate(template.userNameTemplate, userContext),
-              userEmail: this.renderOptionalTemplate(template.userEmailTemplate, userContext),
-              userPhoneNumber: this.renderOptionalTemplate(template.userPhoneNumberTemplate, userContext),
-              apiKeys,
-              authenticators,
-              oauthProviders,
-              userTags,
-            },
-          ],
-        },
-      };
-
-      const handle = await this.submitActivity('/public/v1/submit/create_users', payload, {
-        pollForResult: true,
-        subOrganizationId,
-      });
-      const outcome = await handle.wait();
-      const { userIds, apiKeyIds: issuedApiKeyIds } = this.extractCreateUsersArtifacts(outcome.raw.result);
-      const userId = userIds[0];
-
-      const updatedCredentials = existingCredentials
-        ? {
-            ...existingCredentials,
-            apiKeyId: issuedApiKeyIds[0] ?? existingCredentials.apiKeyId,
-          }
-        : undefined;
-
-      if (updatedCredentials) {
-        this.setAutomationCredentials(template.templateId, updatedCredentials);
-      }
-
-      if (isNonEmptyString(userId)) {
-        automationUsers.push({
-          templateId: template.templateId,
-          userId,
-          apiKeyId: issuedApiKeyIds[0] ?? updatedCredentials?.apiKeyId,
-          apiKeyIds: issuedApiKeyIds,
-          sessionIds: [],
-          credentials: updatedCredentials,
-        });
-      }
+      const automationUser = await this.provisionAutomationUser(template, userContext, subOrganizationId);
+      automationUsers.push(automationUser);
     }
 
     return { automationUsers };
+  }
+
+  async provisionAutomationUser(
+    template: AutomationUserTemplate,
+    context: TemplateContext,
+    subOrganizationId: string
+  ): Promise<AutomationProvisionResult['automationUsers'][number]> {
+    const existingCredentials = this.secretsManager.getAutomationCredentials(template.templateId);
+    const apiKeys = this.resolveAutomationApiKeys(template, context, existingCredentials);
+    if (apiKeys.length === 0) {
+      throw new TurnkeyServiceError(
+        `Automation template "${template.templateId}" is missing API key material; provide apiKeys or pre-load TURNKEY_AUTOMATION_KEYS`,
+        ErrorCodes.INVALID_CONFIG
+      );
+    }
+    const authenticatorSeeds = this.filterAutomationAuthenticators(template.authenticators);
+    const authenticators = this.mapRootUserAuthenticators(authenticatorSeeds, context, template.templateId);
+    const oauthProviders = this.mapRootUserOauthProviders(template.oauthProviders);
+    const userTags = this.mapAutomationUserTags(template.userTags, context);
+
+    const timestampMs = Date.now().toString();
+    const payload = {
+      timestampMs,
+      type: 'ACTIVITY_TYPE_CREATE_USERS_V3',
+      parameters: {
+        users: [
+          {
+            userName: this.renderTemplate(template.userNameTemplate, context),
+            userEmail: this.renderOptionalTemplate(template.userEmailTemplate, context),
+            userPhoneNumber: this.renderOptionalTemplate(template.userPhoneNumberTemplate, context),
+            apiKeys,
+            authenticators,
+            oauthProviders,
+            userTags,
+          },
+        ],
+      },
+    };
+
+    const handle = await this.submitActivity('/public/v1/submit/create_users', payload, {
+      pollForResult: true,
+      subOrganizationId,
+    });
+    const outcome = await handle.wait();
+    const { userIds, apiKeyIds: issuedApiKeyIds } = this.extractCreateUsersArtifacts(outcome.raw.result);
+    const userId = userIds[0];
+
+    const updatedCredentials = existingCredentials
+      ? {
+          ...existingCredentials,
+          apiKeyId: issuedApiKeyIds[0] ?? existingCredentials.apiKeyId,
+        }
+      : undefined;
+
+    if (updatedCredentials) {
+      this.setAutomationCredentials(template.templateId, updatedCredentials);
+    }
+
+    if (!isNonEmptyString(userId)) {
+      throw new TurnkeyServiceError(
+        `Failed to create automation user for template "${template.templateId}"`,
+        ErrorCodes.API_ERROR
+      );
+    }
+
+    return {
+      templateId: template.templateId,
+      userId,
+      apiKeyId: issuedApiKeyIds[0] ?? updatedCredentials?.apiKeyId,
+      apiKeyIds: issuedApiKeyIds,
+      sessionIds: [],
+      credentials: updatedCredentials,
+    };
   }
 
   provisionWalletForTemplate(
@@ -1324,6 +1339,7 @@ export class TurnkeyClientManager {
       walletId,
       accountIds,
       accountAddresses,
+      walletName,
     };
   }
 

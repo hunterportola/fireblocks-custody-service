@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+import * as crypto from 'crypto';
+
+console.warn('🔧 Quick Test Setup');
+console.warn('==================');
+console.warn('');
+console.warn('To test the multi-tenant system, you need:');
+console.warn('');
+console.warn('1. PostgreSQL running locally');
+console.warn('2. A superuser account (usually "postgres")');
+console.warn('');
+console.warn('Run these commands to set up test environment:');
+console.warn('');
+console.warn('# 1. Create control plane database');
+console.warn('createdb -U postgres custody_control_plane');
+console.warn('');
+console.warn('# 2. Set environment variables');
+const controlPlaneUrl = 'postgresql://postgres@localhost:5432/custody_control_plane';
+console.warn(`export CONTROL_PLANE_DATABASE_URL="${controlPlaneUrl}"`);
+console.warn('export ADMIN_DATABASE_URL="postgresql://postgres@localhost:5432/postgres"');
+console.warn(`export TENANT_DB_ENCRYPTION_KEY="${crypto.randomBytes(32).toString('hex')}"`);
+console.warn('');
+console.warn('# 3. Initialize control plane');
+console.warn('npm run init-control-plane');
+console.warn('');
+console.warn('# 4. Test tenant provisioning');
+console.warn('npm run test-tenant-provisioning');
+console.warn('');
+console.warn('Or use this one-liner for testing (requires postgres user):');
+console.warn('');
+const oneLinerUrl = 'postgresql://postgres@localhost:5432/custody_control_plane';
+console.warn(`CONTROL_PLANE_DATABASE_URL="${oneLinerUrl}" ADMIN_DATABASE_URL="postgresql://postgres@localhost:5432/postgres" TENANT_DB_ENCRYPTION_KEY="${crypto.randomBytes(32).toString('hex')}" npm run test-tenant-provisioning`);

@@ -6,12 +6,13 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 
 import { errorHandler } from './middleware/error-handler';
-import { requestLogger } from './middleware/request-logger';
-import { lenderAuth } from './middleware/lender-auth';
+import { requestLogger, logInfo } from './middleware/request-logger';
 
 import { disbursementRoutes } from './routes/disbursements';
 import { lenderRoutes } from './routes/lenders';
 import { healthRoutes } from './routes/health';
+import { requireTenantAuth } from './middleware/tenant-auth';
+import { createOriginatorRoutes } from './routes/originators';
 
 export interface ServerConfig {
   port: number;
@@ -87,14 +88,17 @@ export class CustodyAPIServer {
     // Health check (no auth required)
     this.app.use('/api/v1/health', healthRoutes);
 
-    // Lender management (auth required)
-    this.app.use('/api/v1/lenders', lenderAuth, lenderRoutes);
+    // Control plane onboarding routes (internal auth)
+    this.app.use('/api/v1/originators', createOriginatorRoutes());
 
-    // Disbursement operations (auth required)
-    this.app.use('/api/v1/disbursements', lenderAuth, disbursementRoutes);
+    // Lender management (ensure tenant context before router-level permissions)
+    this.app.use('/api/v1/lenders', requireTenantAuth(), lenderRoutes);
+
+    // Disbursement operations (tenant auth handled at route level)
+    this.app.use('/api/v1/disbursements', disbursementRoutes);
 
     // 404 handler
-    this.app.use((req, res) => {
+    this.app.use((req, res): void => {
       res.status(404).json({
         error: 'NOT_FOUND',
         message: `Route ${req.method} ${req.originalUrl} not found`,
@@ -108,42 +112,28 @@ export class CustodyAPIServer {
   }
 
   public async start(): Promise<void> {
-    // Initialize MVP custody service
-    try {
-      const { initializeMVPCustodyService } = await import('../services/mvp-custody-integration');
-      await initializeMVPCustodyService();
-      console.log('🔐 MVP Custody Service initialized');
-    } catch (error) {
-      console.warn('⚠️  Custody service initialization failed, using fallback:', error);
-    }
     
     await new Promise<void>((resolve) => {
       const server = this.app.listen(this.config.port, () => {
-        console.log(`🚀 Custody API Server running on port ${this.config.port}`);
-        console.log(`📊 Environment: ${this.config.environment}`);
-        console.log(`🔒 CORS origins: ${this.config.corsOrigins?.join(', ') ?? 'disabled'}`);
-        console.log('');
-        console.log('🔑 Test API Keys:');
-        console.log('  - lender_acme_corp_api_key_xyz123');
-        console.log('  - lender_demo_api_key_abc789');
-        console.log('  - originator_acme_lending_api_key_5u55s56j9n8');
-        console.log('  - originator_stellar_loans_api_key_ue162vf99l9');
+        logInfo(`🚀 Custody API Server running on port ${this.config.port}`);
+        logInfo(`📊 Environment: ${this.config.environment}`);
+        logInfo(`🔒 CORS origins: ${this.config.corsOrigins?.join(', ') ?? 'disabled'}`);
         resolve();
       });
 
       // Graceful shutdown
-      process.on('SIGTERM', () => {
-        console.log('🛑 SIGTERM received, shutting down gracefully');
-        server.close(() => {
-          console.log('✅ Server closed');
+      process.on('SIGTERM', (): void => {
+        logInfo('🛑 SIGTERM received, shutting down gracefully');
+        server.close((): void => {
+          logInfo('✅ Server closed');
           process.exit(0);
         });
       });
 
-      process.on('SIGINT', () => {
-        console.log('🛑 SIGINT received, shutting down gracefully');
-        server.close(() => {
-          console.log('✅ Server closed');
+      process.on('SIGINT', (): void => {
+        logInfo('🛑 SIGINT received, shutting down gracefully');
+        server.close((): void => {
+          logInfo('✅ Server closed');
           process.exit(0);
         });
       });
